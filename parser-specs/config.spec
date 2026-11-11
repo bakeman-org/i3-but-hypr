@@ -25,6 +25,8 @@ state INITIAL:
   'bar'                                    -> BARBRACE
   'font'                                   -> FONT
   'mode'                                   -> MODENAME
+  'gaps_in'                                -> GAPS_IN
+  'gaps_out'                               -> GAPS_OUT
   'gaps'                                   -> GAPS
   'smart_borders'                          -> SMART_BORDERS
   'smart_gaps'                             -> SMART_GAPS
@@ -62,8 +64,6 @@ state INITIAL:
   'dim_strength'                           -> DIM_STRENGTH
   'rounding', 'border_radius'              -> ROUNDING
   'border_size'                            -> BORDER_SIZE
-  'gaps_in'                                -> GAPS_IN
-  'gaps_out'                               -> GAPS_OUT
   'titlebar_height'                        -> TITLEBAR_HEIGHT
   'titlebar_padding'                       -> TITLEBAR_PADDING
   'titlebar'                               -> TITLEBAR_VISIBILITY
@@ -913,62 +913,22 @@ state SCROLLER_DEFAULT_PROPORTION_SINGLE:
   value = string
       -> call cfg_scroller_default_proportion_single($value)
 
-# client.focused_gradient <start-color> <end-color> [angle]
+# client.focused_gradient "#color #color [angle]"
 state CLIENT_GRADIENT_FOCUSED:
-  start = string
-      -> CLIENT_GRADIENT_FOCUSED_END
+  spec = string
+      -> call cfg_client_gradient_focused($spec)
 
-state CLIENT_GRADIENT_FOCUSED_END:
-  end_color = string
-      -> CLIENT_GRADIENT_FOCUSED_DONE
-
-state CLIENT_GRADIENT_FOCUSED_DONE:
-  end
-      -> call cfg_client_gradient_focused($start, $end_color, 45)
-  angle = number
-      -> call cfg_client_gradient_focused($start, $end_color, &angle)
-
-# client.focused_inactive_gradient <start-color> <end-color> [angle]
+# client.focused_inactive_gradient "#color #color [angle]"
 state CLIENT_GRADIENT_FOCUSED_INACTIVE:
-  start = string
-      -> CLIENT_GRADIENT_FOCUSED_INACTIVE_END
+  spec = string
+      -> call cfg_client_gradient_focused_inactive($spec)
 
-state CLIENT_GRADIENT_FOCUSED_INACTIVE_END:
-  end_color = string
-      -> CLIENT_GRADIENT_FOCUSED_INACTIVE_DONE
-
-state CLIENT_GRADIENT_FOCUSED_INACTIVE_DONE:
-  end
-      -> call cfg_client_gradient_focused_inactive($start, $end_color, 45)
-  angle = number
-      -> call cfg_client_gradient_focused_inactive($start, $end_color, &angle)
-
-# client.unfocused_gradient <start-color> <end-color> [angle]
+# client.unfocused_gradient "#color #color [angle]"
 state CLIENT_GRADIENT_UNFOCUSED:
-  start = string
-      -> CLIENT_GRADIENT_UNFOCUSED_END
+  spec = string
+      -> call cfg_client_gradient_unfocused($spec)
 
-state CLIENT_GRADIENT_UNFOCUSED_END:
-  end_color = string
-      -> CLIENT_GRADIENT_UNFOCUSED_DONE
-
-state CLIENT_GRADIENT_UNFOCUSED_DONE:
-  end
-      -> call cfg_client_gradient_unfocused($start, $end_color, 45)
-  angle = number
-      -> call cfg_client_gradient_unfocused($start, $end_color, &angle)
-
-# client.urgent_gradient <start-color> <end-color> [angle]
+# client.urgent_gradient "#color #color [angle]"
 state CLIENT_GRADIENT_URGENT:
-  start = string
-      -> CLIENT_GRADIENT_URGENT_END
-
-state CLIENT_GRADIENT_URGENT_END:
-  end_color = string
-      -> CLIENT_GRADIENT_URGENT_DONE
-
-state CLIENT_GRADIENT_URGENT_DONE:
-  end
-      -> call cfg_client_gradient_urgent($start, $end_color, 45)
-  angle = number
-      -> call cfg_client_gradient_urgent($start, $end_color, &angle)
+  spec = string
+      -> call cfg_client_gradient_urgent($spec)

@@ -1222,14 +1222,23 @@ CFGFUN(titlebar_visibility, const char *value) {
  * Parses a gradient border definition: "#rrggbb #rrggbb [angle]".
  *
  */
-static void parse_gradient(struct gradient_spec *spec, const char *start,
-                           const char *end, const long angle, const char *classname) {
+static void parse_gradient(struct gradient_spec *spec, const char *spec_str,
+                           const char *classname) {
+    char *copy = sstrdup(spec_str);
+    char *saveptr = NULL;
+    char *start = strtok_r(copy, " \t,", &saveptr);
+    char *end = strtok_r(NULL, " \t,", &saveptr);
+    char *angle_str = strtok_r(NULL, " \t,", &saveptr);
+
     if (start == NULL || end == NULL || start[0] != '#' || end[0] != '#') {
         ELOG("Invalid gradient for %s, expected two colors like "
-             "\"#33ccffee #00ff99ee [angle]\"\n",
+             "\"#33ccff #00ff99 [45]\"\n",
              classname);
+        free(copy);
         return;
     }
+
+    const long angle = (angle_str != NULL) ? strtol(angle_str, NULL, 10) : 45;
 
     spec->start = draw_util_hex_to_color(start);
     spec->end = draw_util_hex_to_color(end);
@@ -1238,23 +1247,25 @@ static void parse_gradient(struct gradient_spec *spec, const char *start,
 
     DLOG("gradient for %s: %s -> %s at %d degrees\n",
          classname, start, end, spec->angle);
+
+    free(copy);
 }
 
-CFGFUN(client_gradient_focused, const char *start, const char *end, const long angle) {
-    parse_gradient(&config.client_gradients.focused, start, end, angle, "client.focused");
+CFGFUN(client_gradient_focused, const char *spec) {
+    parse_gradient(&config.client_gradients.focused, spec, "client.focused");
 }
 
-CFGFUN(client_gradient_focused_inactive, const char *start, const char *end, const long angle) {
-    parse_gradient(&config.client_gradients.focused_inactive, start, end, angle,
+CFGFUN(client_gradient_focused_inactive, const char *spec) {
+    parse_gradient(&config.client_gradients.focused_inactive, spec,
                    "client.focused_inactive");
 }
 
-CFGFUN(client_gradient_unfocused, const char *start, const char *end, const long angle) {
-    parse_gradient(&config.client_gradients.unfocused, start, end, angle, "client.unfocused");
+CFGFUN(client_gradient_unfocused, const char *spec) {
+    parse_gradient(&config.client_gradients.unfocused, spec, "client.unfocused");
 }
 
-CFGFUN(client_gradient_urgent, const char *start, const char *end, const long angle) {
-    parse_gradient(&config.client_gradients.urgent, start, end, angle, "client.urgent");
+CFGFUN(client_gradient_urgent, const char *spec) {
+    parse_gradient(&config.client_gradients.urgent, spec, "client.urgent");
 }
 
 /*

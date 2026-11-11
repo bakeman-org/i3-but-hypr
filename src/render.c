@@ -594,8 +594,21 @@ static void render_con_scroller(Con *con, Con *child, render_params *p, int i) {
     }
 
     const bool single = (count == 1);
-    const bool overspread = (config.scroller_prefer_overspread && count > 1 &&
-                             (focus_index == 0 || focus_index == count - 1));
+    const bool at_edge = (focus_index == 0 || focus_index == count - 1);
+
+    /* Decide whether the focused column is centered or anchored to the edge
+     * it is closest to. This mirrors mangowc's priority:
+     * focus_center > prefer_center > overspread. */
+    bool center;
+    if (single && !config.scroller_proportion_single) {
+        center = false;
+    } else if (config.scroller_focus_center || single) {
+        center = true;
+    } else if (at_edge && config.scroller_prefer_overspread) {
+        center = false;
+    } else {
+        center = config.scroller_prefer_center;
+    }
 
     int focus_x;
     if (single && !config.scroller_proportion_single) {
@@ -603,16 +616,11 @@ static void render_con_scroller(Con *con, Con *child, render_params *p, int i) {
          * layout. */
         widths[0] = (int)p->rect.width;
         focus_x = (int)p->rect.x;
-    } else if (overspread) {
-        /* The outermost column takes the whole width instead of its
-         * proportion. */
-        widths[focus_index] = (int)p->rect.width;
-        focus_x = (int)p->rect.x;
-    } else if (single || config.scroller_focus_center) {
+    } else if (center) {
         focus_x = (int)p->rect.x + ((int)p->rect.width - widths[focus_index]) / 2;
     } else if (focus_index * 2 < count) {
-        /* Focus is on the left half: anchor it to the left and let the
-         * following columns run off the right edge. */
+        /* Anchor the focused column to the left edge and let the following
+         * columns run off the right edge. */
         focus_x = (int)p->rect.x + structs;
     } else {
         focus_x = (int)p->rect.x + (int)p->rect.width - structs - widths[focus_index];
@@ -626,8 +634,11 @@ static void render_con_scroller(Con *con, Con *child, render_params *p, int i) {
         positions[j] = positions[j + 1] - widths[j];
     }
 
+    /* Columns may be scrolled out of the visible area; negative coordinates
+     * are truncated to 16 bit by the X server, which results in exactly the
+     * clipping a compositor would do. */
     child->rect = (Rect){
-        (uint32_t)MAX(0, positions[i]),
+        (uint32_t)positions[i],
         p->rect.y,
         (uint32_t)widths[i],
         p->rect.height,

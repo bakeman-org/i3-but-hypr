@@ -65,6 +65,10 @@ typedef struct con_state {
     /* Radius of the rounded corners that was last applied to the frame and
      * the client window. -1 means "not applied yet". */
     int rounding;
+    /* Size of the frame and of the client window when the shape was last
+     * applied; the shape has to be refreshed whenever the size changes. */
+    Rect shape_rect;
+    Rect shape_window_rect;
 
     bool initial;
 
@@ -981,12 +985,18 @@ static void x_set_rounded_shape(xcb_window_t window, int width, int height, int 
  */
 static void x_apply_rounding(Con *con, con_state *state) {
     const int radius = decoration_radius();
-    if (state != NULL && state->rounding == radius) {
+    if (state != NULL && state->rounding == radius &&
+        state->shape_rect.width == con->rect.width &&
+        state->shape_rect.height == con->rect.height &&
+        state->shape_window_rect.width == con->window_rect.width &&
+        state->shape_window_rect.height == con->window_rect.height) {
         return;
     }
 
     if (state != NULL) {
         state->rounding = radius;
+        state->shape_rect = con->rect;
+        state->shape_window_rect = con->window_rect;
     }
 
     if (!shape_supported) {

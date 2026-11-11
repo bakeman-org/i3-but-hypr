@@ -2556,6 +2556,12 @@ char *con_get_tree_representation(Con *con) {
         buf = sstrdup("T[");
     } else if (con->layout == L_STACKED) {
         buf = sstrdup("S[");
+    } else if (con->layout == L_DWINDLE) {
+        buf = sstrdup("DW[");
+    } else if (con->layout == L_MASTER) {
+        buf = sstrdup("M[");
+    } else if (con->layout == L_SCROLLER) {
+        buf = sstrdup("SC[");
     } else {
         ELOG("BUG: Code not updated to account for new layout type\n");
         assert(false);

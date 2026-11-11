@@ -2624,8 +2624,13 @@ static bool swap_with_master(Con *target) {
     Con *master = TAILQ_FIRST(&(container->nodes_head));
     Con *con = climb_to_container(target, container);
 
-    if (master == NULL || con == NULL || master == con) {
+    if (master == NULL || con == NULL) {
         return false;
+    }
+
+    if (master == con) {
+        /* Already the master: not an error, just a no-op. */
+        return true;
     }
 
     if (!con_swap(master, con)) {
@@ -2681,7 +2686,8 @@ static bool toggle_split(Con *target) {
     /* The last tile always fills the remaining space, so toggling its own
      * split direction has no visible effect: toggle the split before it
      * instead, which is the one that shaped the last tile. */
-    if (TAILQ_NEXT(con, nodes) == NULL) {
+    if (con->parent != NULL && con->parent->layout == L_DWINDLE &&
+        TAILQ_NEXT(con, nodes) == NULL) {
         Con *prev = TAILQ_PREV(con, nodes_head, nodes);
         if (prev != NULL) {
             con = prev;
