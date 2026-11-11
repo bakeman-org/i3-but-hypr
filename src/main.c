@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <xcb/xcb_atom.h>
 #include <xcb/xinerama.h>
@@ -274,6 +275,150 @@ static int parse_restart_fd(void) {
     return fd;
 }
 
+/* Nested (test) mode: run this i3 inside a private Xephyr window so that
+ * every keybinding is handled by i3 itself without interference from the
+ * host window manager / compositor (e.g. testing under Hyprland). */
+static int nest_display = 99;
+
+extern char **environ;
+
+static bool nest_display_in_use(void) {
+    char socketfile[64];
+    snprintf(socketfile, sizeof(socketfile), "/tmp/.X11-unix/X%d", nest_display);
+    return access(socketfile, F_OK) == 0;
+}
+
+/* Work around a broken hand-installed libxkbcommon in
+ * /usr/local/lib/x86_64-linux-gnu by re-executing ourselves with the
+ * distribution library directory first in the search path. */
+static void nest_ensure_system_libs(void) {
+    static const char *broken = "/usr/local/lib/x86_64-linux-gnu/libxkbcommon.so.0";
+    static const char *good = "/usr/lib/x86_64-linux-gnu";
+    struct stat sb;
+    if (stat(broken, &sb) != 0) {
+        return;
+    }
+    const char *current = getenv("LD_LIBRARY_PATH");
+    if (current && strstr(current, good) != NULL) {
+        return;
+    }
+    char buf[4096];
+    snprintf(buf, sizeof(buf), "%s:%s", good, current ? current : "");
+    setenv("LD_LIBRARY_PATH", buf, 1);
+    execve("/proc/self/exe", start_argv, environ);
+    /* execve only returns on error */
+    err(EXIT_FAILURE, "execve(/proc/self/exe)");
+}
+
+/* The host compositor usually owns the same modifier as the user's i3
+ * config (e.g. Super for Hyprland) and consumes those keypresses before
+ * they can reach the nested X server. Rewrite $mod to Alt (Mod1), which
+ * the host compositor does not typically bind. */
+static char *nest_rewrite_config(const char *orig_path) {
+    FILE *orig = fopen(orig_path, "r");
+    if (!orig) {
+        err(EXIT_FAILURE, "nest mode: cannot open config %s", orig_path);
+    }
+    static char template[] = "/tmp/i3-nest-config.XXXXXX";
+    int fd = mkstemp(template);
+    if (fd == -1) {
+        err(EXIT_FAILURE, "mkstemp");
+    }
+    FILE *out = fdopen(fd, "w");
+    if (!out) {
+        err(EXIT_FAILURE, "fdopen");
+    }
+    char *line = NULL;
+    size_t len = 0;
+    while (getline(&line, &len, orig) != -1) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (strncmp(p, "set", 3) == 0 && (p[3] == ' ' || p[3] == '\t')) {
+            char *q = p + 4;
+            while (*q == ' ' || *q == '\t') {
+                q++;
+            }
+            if (strncmp(q, "$mod", 4) == 0 && (q[4] == ' ' || q[4] == '\t')) {
+                fprintf(out, "set $mod Mod1\n");
+                continue;
+            }
+        }
+        fputs(line, out);
+    }
+    free(line);
+    fclose(orig);
+    fclose(out);
+    return sstrdup(template);
+}
+
+/* Spawn Xephyr, re-run ourselves on the nested display and wait for it.
+ * In the child process, returns so that normal startup continues; the
+ * parent process never returns. */
+static void nest_run(void) {
+    char sockfile[64];
+    char disparg[16];
+    snprintf(sockfile, sizeof(sockfile), "/tmp/.X11-unix/X%d", nest_display);
+    snprintf(disparg, sizeof(disparg), ":%d", nest_display);
+
+    if (nest_display_in_use()) {
+        errx(EXIT_FAILURE, "nest mode: display :%d is already in use (%s exists)",
+             nest_display, sockfile);
+    }
+
+    nest_ensure_system_libs();
+
+    pid_t i3_pid = fork();
+    if (i3_pid == -1) {
+        err(EXIT_FAILURE, "fork");
+    }
+
+    if (i3_pid == 0) {
+        /* child: run i3 on the nested display. Xephyr is started by the
+         * parent in parallel; wait for it to accept connections. */
+        setenv("DISPLAY", disparg, 1);
+        for (int i = 0; i < 100; i++) {
+            if (access(sockfile, F_OK) == 0) {
+                break;
+            }
+            usleep(100000);
+        }
+        if (access(sockfile, F_OK) != 0) {
+            errx(EXIT_FAILURE, "nest mode: Xephyr did not start on :%d", nest_display);
+        }
+        LOG("nest mode: running on :%d\n", nest_display);
+        return;
+    }
+
+    pid_t xephyr_pid = fork();
+    if (xephyr_pid == -1) {
+        err(EXIT_FAILURE, "fork");
+    }
+    if (xephyr_pid == 0) {
+        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br", "-screen", "1280x800", (char *)NULL);
+        _exit(127);
+    }
+
+    LOG("nest mode: Xephyr on :%d (pid %d), nested i3 (pid %d)\n",
+        nest_display, xephyr_pid, i3_pid);
+
+    int status;
+    waitpid(i3_pid, &status, 0);
+    kill(xephyr_pid, SIGTERM);
+    int xstatus;
+    waitpid(xephyr_pid, &xstatus, 0);
+
+    if (WIFEXITED(status)) {
+        exit(WEXITSTATUS(status));
+    }
+    if (WIFSIGNALED(status)) {
+        LOG("nested i3 terminated by signal %d\n", WTERMSIG(status));
+        exit(128 + WTERMSIG(status));
+    }
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[]) {
     /* Keep a symbol pointing to the I3_VERSION string constant so that we have
      * it in gdb backtraces. */
@@ -287,6 +432,7 @@ int main(int argc, char *argv[]) {
     bool disable_signalhandler = false;
     bool only_check_config = false;
     bool replace_wm = false;
+    bool nest_mode = false;
     static struct option long_options[] = {
         {"no-autostart", no_argument, 0, 'a'},
         {"config", required_argument, 0, 'c'},
@@ -309,6 +455,7 @@ int main(int argc, char *argv[]) {
         {"fake_outputs", required_argument, 0, 0},
         {"fake-outputs", required_argument, 0, 0},
         {"force-old-config-parser-v4.4-only", no_argument, 0, 0},
+        {"nest", optional_argument, 0, 0},
         {"replace", no_argument, 0, 'r'},
         {0, 0, 0, 0}};
     int option_index = 0, opt;
@@ -428,6 +575,15 @@ int main(int argc, char *argv[]) {
                 } else if (strcmp(long_options[option_index].name, "force-old-config-parser-v4.4-only") == 0) {
                     ELOG("You are passing --force-old-config-parser-v4.4-only, but that flag was removed by now.\n");
                     break;
+                } else if (strcmp(long_options[option_index].name, "nest") == 0) {
+                    nest_mode = true;
+                    if (optarg) {
+                        nest_display = atoi(optarg);
+                        if (nest_display <= 0) {
+                            errx(EXIT_FAILURE, "Invalid --nest display number: %s", optarg);
+                        }
+                    }
+                    break;
                 }
             /* fall-through */
             default:
@@ -459,6 +615,12 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "\t--replace\n"
                                 "\tReplace an existing window manager.\n");
                 fprintf(stderr, "\n");
+                fprintf(stderr, "\t--nest[=DISPLAY]\n"
+                                "\tTest mode: run i3 inside a private Xephyr window.\n"
+                                "\tAll keybindings are handled by this i3 and do not\n"
+                                "\treach the host window manager (e.g. Hyprland).\n"
+                                "\tDISPLAY selects the display number (default 99).\n");
+                fprintf(stderr, "\n");
                 fprintf(stderr, "If you pass plain text arguments, i3 will interpret them as a command\n"
                                 "to send to a currently running i3 (like i3-msg). This allows you to\n"
                                 "use nice and logical commands, such as:\n"
@@ -469,6 +631,19 @@ int main(int argc, char *argv[]) {
                                 "\n");
                 exit(opt == 'h' ? EXIT_SUCCESS : EXIT_FAILURE);
         }
+    }
+
+    if (nest_mode) {
+        if (override_configpath == NULL) {
+            char *orig_config = get_config_path(NULL, true);
+            if (orig_config) {
+                override_configpath = nest_rewrite_config(orig_config);
+                free(orig_config);
+                LOG("nest mode: using rewritten config %s ($mod -> Mod1)\n",
+                    override_configpath);
+            }
+        }
+        nest_run();
     }
 
     if (only_check_config) {
