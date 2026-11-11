@@ -1947,13 +1947,17 @@ int con_titlebar_height(Con *con) {
         }
     }
 
-    if (config.titlebar_height > 0) {
-        return config.titlebar_height;
-    }
-
     int deco_height = config.font.height + 4;
     if (config.font.height & 0x01) {
         ++deco_height;
+    }
+
+    if (config.titlebar_height > 0) {
+        /* Never go below what the font needs: a title bar shorter than the
+         * font height would clip the title text away completely (this
+         * happened with e.g. “font pango:monospace 18” and
+         * “titlebar_height 20”). */
+        return MAX(config.titlebar_height, deco_height);
     }
 
     return deco_height;

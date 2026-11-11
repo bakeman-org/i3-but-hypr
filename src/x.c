@@ -524,8 +524,12 @@ void x_draw_decoration(Con *con) {
         return;
     }
 
-    /* 1: build deco_params and compare with cache */
-    struct deco_render_params *p = scalloc(1, sizeof(struct deco_render_params));
+    /* 1: build deco_params and compare with cache. The params are assembled on
+     * the stack: this function runs for every decoration redraw (resizes,
+     * title changes, focus changes, …), so we only pay for a heap allocation
+     * when the cache actually needs to be updated. */
+    struct deco_render_params params = {0};
+    struct deco_render_params *p = &params;
 
     /* find out which colors to use */
     if (con->urgent) {
@@ -560,7 +564,6 @@ void x_draw_decoration(Con *con) {
         !con->pixmap_recreated &&
         !con->mark_changed &&
         memcmp(p, con->deco_render_params, sizeof(struct deco_render_params)) == 0) {
-        free(p);
         goto copy_pixmaps;
     }
 
@@ -570,7 +573,8 @@ void x_draw_decoration(Con *con) {
     }
 
     FREE(con->deco_render_params);
-    con->deco_render_params = p;
+    con->deco_render_params = smalloc(sizeof(struct deco_render_params));
+    memcpy(con->deco_render_params, p, sizeof(struct deco_render_params));
 
     if (con->window != NULL && con->window->name_x_changed) {
         con->window->name_x_changed = false;
@@ -952,30 +956,47 @@ static void x_set_rounded_shape(xcb_window_t window, int width, int height, int 
         radius = MIN(width, height) / 2;
     }
 
-    const int rows = radius;
-    /* Top and bottom part plus one rectangle spanning the middle. */
-    xcb_rectangle_t *rects = smalloc(sizeof(xcb_rectangle_t) * (2 * rows + 1));
-    int count = 0;
+    /* The shape is applied to the frame AND the client window of a container
+     * and is re-applied on every configure, usually with the very same
+     * geometry. Keep the row geometry around so we neither re-run the
+     * trigonometry nor allocate a fresh array each time. */
+    static xcb_rectangle_t *rects = NULL;
+    static size_t rects_size = 0;
+    static size_t count = 0;
+    static int cached_width = -1, cached_height = -1, cached_radius = -1;
 
-    for (int y = 0; y < rows; y++) {
-        const double dy = radius - y - 0.5;
-        const double span = sqrt(MAX(0.0, (double)radius * radius - dy * dy));
-        const int inset = radius - (int)lround(span);
+    if (width != cached_width || height != cached_height || radius != cached_radius) {
+        const size_t needed = 2 * (size_t)radius + 1;
+        if (needed > rects_size) {
+            rects = srealloc(rects, sizeof(xcb_rectangle_t) * needed);
+            rects_size = needed;
+        }
 
-        /* one row at the top … */
+        count = 0;
+        for (int y = 0; y < radius; y++) {
+            const double dy = radius - y - 0.5;
+            const double span = sqrt(MAX(0.0, (double)radius * radius - dy * dy));
+            const int inset = radius - (int)lround(span);
+
+            /* one row at the top … */
+            rects[count++] = (xcb_rectangle_t){
+                .x = inset, .y = y, .width = width - 2 * inset, .height = 1};
+            /* … and the mirrored row at the bottom. */
+            rects[count++] = (xcb_rectangle_t){
+                .x = inset, .y = height - 1 - y, .width = width - 2 * inset, .height = 1};
+        }
+
+        /* plus one rectangle spanning the middle */
         rects[count++] = (xcb_rectangle_t){
-            .x = inset, .y = y, .width = width - 2 * inset, .height = 1};
-        /* … and the mirrored row at the bottom. */
-        rects[count++] = (xcb_rectangle_t){
-            .x = inset, .y = height - 1 - y, .width = width - 2 * inset, .height = 1};
+            .x = 0, .y = radius, .width = width, .height = height - 2 * radius};
+
+        cached_width = width;
+        cached_height = height;
+        cached_radius = radius;
     }
-
-    rects[count++] = (xcb_rectangle_t){
-        .x = 0, .y = radius, .width = width, .height = height - 2 * radius};
 
     xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
                          XCB_CLIP_ORDERING_UNSORTED, window, 0, 0, count, rects);
-    free(rects);
 }
 
 /*
