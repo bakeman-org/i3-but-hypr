@@ -386,9 +386,10 @@ static void x_draw_title_border(Con *con, struct deco_render_params *p, surface_
     draw_util_rectangle(dest_surface, p->color->border,
                         dr->x, dr->y, dr->width, 1);
 
-    /* Bottom */
-    draw_util_rectangle(dest_surface, p->color->border,
-                        dr->x, dr->y + dr->height - 1, dr->width, 1);
+    /* Bottom: Hyprland-style accent line in the indicator color. */
+    const int accent_height = MAX(1, logical_px(2));
+    draw_util_rectangle(dest_surface, p->color->indicator,
+                        dr->x, dr->y + dr->height - accent_height, dr->width, accent_height);
 }
 
 /*
@@ -576,6 +577,12 @@ void x_draw_decoration(Con *con) {
     con->deco_render_params = smalloc(sizeof(struct deco_render_params));
     memcpy(con->deco_render_params, p, sizeof(struct deco_render_params));
 
+    /* Leaf containers always repaint their own frame_buffer below (window
+     * background and border ring), so its pixmap needs a fresh copy. */
+    if (con_is_leaf(con)) {
+        con->frame_dirty = true;
+    }
+
     if (con->window != NULL && con->window->name_x_changed) {
         con->window->name_x_changed = false;
     }
@@ -683,17 +690,35 @@ void x_draw_decoration(Con *con) {
         goto copy_pixmaps;
     }
 
+    /* From here on the decoration is painted into dest_surface, which may be
+     * the parent's frame buffer (tabbed/stacked children). Skipping this (and
+     * the copy) for untouched containers is what keeps 60 Hz animation
+     * renders cheap: only the animated windows generate damage, which matters
+     * a lot in nested X servers that recomposite every damaged window. */
+    if (dest_surface != &(con->frame_buffer)) {
+        parent->frame_dirty = true;
+    }
+
     /* 4: paint the bar */
     DLOG("con->deco_rect = (x=%d, y=%d, w=%d, h=%d) for con->name=%s\n",
          con->deco_rect.x, con->deco_rect.y, con->deco_rect.width, con->deco_rect.height, con->name);
-    draw_util_rectangle(dest_surface, p->color->background,
-                        con->deco_rect.x, con->deco_rect.y, con->deco_rect.width, con->deco_rect.height);
+    if (decoration_radius() > 0 && con_draw_decoration_into_frame(con)) {
+        /* Round the top corners so the title bar follows the rounded window
+         * frame; the frame's border ring stays visible at the corners. */
+        draw_util_rounded_top_rectangle(dest_surface, p->color->background,
+                                        con->deco_rect.x, con->deco_rect.y, con->deco_rect.width, con->deco_rect.height,
+                                        decoration_radius());
+    } else {
+        draw_util_rectangle(dest_surface, p->color->background,
+                            con->deco_rect.x, con->deco_rect.y, con->deco_rect.width, con->deco_rect.height);
+    }
 
     /* 5: draw title border */
     x_draw_title_border(con, p, dest_surface);
 
-    /* 6: draw the icon and title */
-    int text_offset_y = (con->deco_rect.height - config.font.height) / 2;
+    /* 6: draw the icon and title, using the dedicated titlebar font if set */
+    set_font(&config.titlebar_font);
+    int text_offset_y = (con->deco_rect.height - config.titlebar_font.height) / 2;
 
     struct Window *win = con->window;
 
@@ -808,6 +833,7 @@ void x_draw_decoration(Con *con) {
                    con->deco_rect.x + title_offset_x,
                    con->deco_rect.y + text_offset_y,
                    deco_width - mark_width - 2 * title_padding - total_icon_space);
+    set_font(&config.font);
     if (has_icon) {
         draw_util_image(
             win->icon,
@@ -824,7 +850,10 @@ void x_draw_decoration(Con *con) {
 
     x_draw_decoration_after_title(con, p, dest_surface);
 copy_pixmaps:
-    draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
+    if (con->frame_dirty) {
+        draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
+        con->frame_dirty = false;
+    }
 }
 
 /*
@@ -848,8 +877,9 @@ void x_deco_recurse(Con *con) {
             x_deco_recurse(current);
         }
 
-        if (state->mapped) {
+        if (state->mapped && con->frame_dirty) {
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
+            con->frame_dirty = false;
         }
     }
 
@@ -1294,6 +1324,9 @@ void x_push_node(Con *con) {
 
             draw_util_surface_set_size(&(con->frame), width, height);
             con->pixmap_recreated = true;
+            /* The freshly created buffer only holds black pixels until the
+             * decoration render below repopulates it. */
+            con->frame_dirty = true;
 
             /* Don’t render the decoration for windows inside a stack which are
              * not visible right now
@@ -1317,6 +1350,7 @@ void x_push_node(Con *con) {
         xcb_set_window_rect(conn, con->frame.id, rect);
         if (con->frame_buffer.id != XCB_NONE) {
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
+            con->frame_dirty = false;
         }
         xcb_flush(conn);
 
@@ -1404,6 +1438,7 @@ void x_push_node(Con *con) {
         /* copy the pixmap contents to the frame window immediately after mapping */
         if (con->frame_buffer.id != XCB_NONE) {
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
+            con->frame_dirty = false;
         }
         xcb_flush(conn);
 

@@ -24,6 +24,7 @@ state INITIAL:
   bindtype = 'bindsym', 'bindcode', 'bind' -> BINDING
   'bar'                                    -> BARBRACE
   'font'                                   -> FONT
+  'titlebar_font'                          -> TITLEBAR_FONT
   'mode'                                   -> MODENAME
   'gaps_in'                                -> GAPS_IN
   'gaps_out'                               -> GAPS_OUT
@@ -460,6 +461,11 @@ state EXEC:
 state FONT:
   font = string
       -> call cfg_font($font)
+
+# titlebar_font font
+state TITLEBAR_FONT:
+  font = string
+      -> call cfg_titlebar_font($font)
 
 # bindsym/bindcode
 state BINDING:

@@ -644,6 +644,12 @@ void draw_util_rounded_rectangle(surface_t *surface, color_t color, double x, do
 void draw_util_gradient_rounded_rectangle(surface_t *surface, color_t start, color_t end, double angle, double x, double y, double w, double h, double radius);
 
 /**
+ * Draws a filled rectangle with rounded top corners (square bottom corners).
+ *
+ */
+void draw_util_rounded_top_rectangle(surface_t *surface, color_t color, double x, double y, double w, double h, double radius);
+
+/**
  * Clears a surface with the given color.
  *
  */

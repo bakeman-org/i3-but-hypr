@@ -379,6 +379,39 @@ void draw_util_rounded_rectangle(surface_t *surface, color_t color, double x, do
 }
 
 /*
+ * Draws a filled rectangle whose top corners are rounded and whose bottom
+ * corners stay square. Used for title bars which sit on top of a rounded
+ * window frame, so the frame's border ring stays visible at the top corners.
+ *
+ */
+void draw_util_rounded_top_rectangle(surface_t *surface, color_t color, double x, double y, double w, double h, double radius) {
+    if (!surface_initialized(surface)) {
+        return;
+    }
+
+    cairo_save(surface->cr);
+    cairo_set_operator(surface->cr, CAIRO_OPERATOR_SOURCE);
+    draw_util_set_source_color(surface, color);
+
+    const double max_radius = MIN(w, h) / 2.0;
+    if (radius > 0.0 && radius <= max_radius && h > radius) {
+        const double right = x + w;
+
+        cairo_new_sub_path(surface->cr);
+        cairo_arc(surface->cr, x + radius, y + radius, radius, M_PI, 1.5 * M_PI);
+        cairo_arc(surface->cr, right - radius, y + radius, radius, 1.5 * M_PI, 2.0 * M_PI);
+        cairo_close_path(surface->cr);
+        cairo_fill(surface->cr);
+    } else {
+        cairo_rectangle(surface->cr, x, y, w, h);
+        cairo_fill(surface->cr);
+    }
+
+    CAIRO_SURFACE_FLUSH(surface->surface);
+    cairo_restore(surface->cr);
+}
+
+/*
  * Draws a filled rectangle with rounded corners, filled with a linear
  * gradient.
  *

@@ -310,49 +310,6 @@ static void nest_ensure_system_libs(void) {
     err(EXIT_FAILURE, "execve(/proc/self/exe)");
 }
 
-/* The host compositor usually owns the same modifier as the user's i3
- * config (e.g. Super for Hyprland) and consumes those keypresses before
- * they can reach the nested X server. Rewrite $mod to Alt (Mod1), which
- * the host compositor does not typically bind. */
-static char *nest_rewrite_config(const char *orig_path) {
-    FILE *orig = fopen(orig_path, "r");
-    if (!orig) {
-        err(EXIT_FAILURE, "nest mode: cannot open config %s", orig_path);
-    }
-    static char template[] = "/tmp/i3-nest-config.XXXXXX";
-    int fd = mkstemp(template);
-    if (fd == -1) {
-        err(EXIT_FAILURE, "mkstemp");
-    }
-    FILE *out = fdopen(fd, "w");
-    if (!out) {
-        err(EXIT_FAILURE, "fdopen");
-    }
-    char *line = NULL;
-    size_t len = 0;
-    while (getline(&line, &len, orig) != -1) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t') {
-            p++;
-        }
-        if (strncmp(p, "set", 3) == 0 && (p[3] == ' ' || p[3] == '\t')) {
-            char *q = p + 4;
-            while (*q == ' ' || *q == '\t') {
-                q++;
-            }
-            if (strncmp(q, "$mod", 4) == 0 && (q[4] == ' ' || q[4] == '\t')) {
-                fprintf(out, "set $mod Mod1\n");
-                continue;
-            }
-        }
-        fputs(line, out);
-    }
-    free(line);
-    fclose(orig);
-    fclose(out);
-    return sstrdup(template);
-}
-
 /* Spawn Xephyr, re-run ourselves on the nested display and wait for it.
  * In the child process, returns so that normal startup continues; the
  * parent process never returns. */
@@ -387,6 +344,9 @@ static void nest_run(void) {
         if (access(sockfile, F_OK) != 0) {
             errx(EXIT_FAILURE, "nest mode: Xephyr did not start on :%d", nest_display);
         }
+        /* Mark this instance so that reloads re-duplicate the Mod4 bindings
+         * (see duplicate_bindings_for_nest_mode()). */
+        setenv("I3_NEST", "1", 1);
         LOG("nest mode: running on :%d\n", nest_display);
         return;
     }
@@ -396,7 +356,8 @@ static void nest_run(void) {
         err(EXIT_FAILURE, "fork");
     }
     if (xephyr_pid == 0) {
-        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br", "-screen", "1280x800", (char *)NULL);
+        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br", "-fullscreen",
+               "-screen", "1280x800", (char *)NULL);
         _exit(127);
     }
 
@@ -616,10 +577,12 @@ int main(int argc, char *argv[]) {
                                 "\tReplace an existing window manager.\n");
                 fprintf(stderr, "\n");
                 fprintf(stderr, "\t--nest[=DISPLAY]\n"
-                                "\tTest mode: run i3 inside a private Xephyr window.\n"
-                                "\tAll keybindings are handled by this i3 and do not\n"
-                                "\treach the host window manager (e.g. Hyprland).\n"
-                                "\tDISPLAY selects the display number (default 99).\n");
+                                "\tTest mode: run i3 inside a private fullscreen\n"
+                                "\tXephyr window to simulate a real session. The\n"
+                                "\tconfig's $mod (Super) is additionally bound to\n"
+                                "\tAlt, since the host window manager (e.g.\n"
+                                "\tHyprland) usually owns Super. DISPLAY selects\n"
+                                "\tthe display number (default 99).\n");
                 fprintf(stderr, "\n");
                 fprintf(stderr, "If you pass plain text arguments, i3 will interpret them as a command\n"
                                 "to send to a currently running i3 (like i3-msg). This allows you to\n"
@@ -634,15 +597,6 @@ int main(int argc, char *argv[]) {
     }
 
     if (nest_mode) {
-        if (override_configpath == NULL) {
-            char *orig_config = get_config_path(NULL, true);
-            if (orig_config) {
-                override_configpath = nest_rewrite_config(orig_config);
-                free(orig_config);
-                LOG("nest mode: using rewritten config %s ($mod -> Mod1)\n",
-                    override_configpath);
-            }
-        }
         nest_run();
     }
 
@@ -862,6 +816,9 @@ int main(int argc, char *argv[]) {
 #undef xmacro
 
     load_configuration(override_configpath, C_LOAD);
+
+    /* Hyprland-style automatic config reload. */
+    config_watcher_init();
 
     if (config.ipc_socket_path == NULL) {
         /* Fall back to a file name in /tmp/ based on the PID */
@@ -1094,6 +1051,9 @@ int main(int argc, char *argv[]) {
         die("Could not load keymap\n");
     }
 
+    if (nest_mode) {
+        duplicate_bindings_for_nest_mode();
+    }
     translate_keysyms();
     grab_all_keys(conn);
 

@@ -120,6 +120,9 @@ struct Config {
     const char *terminal;
     i3Font font;
 
+    /** Font for window title bars; falls back to `font` when unset. */
+    i3Font titlebar_font;
+
     char *ipc_socket_path;
     char *restart_state_path;
 

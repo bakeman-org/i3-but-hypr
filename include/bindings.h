@@ -57,6 +57,15 @@ Binding *get_binding_from_xcb_event(xcb_generic_event_t *event);
 void translate_keysyms(void);
 
 /**
+ * Duplicates every keyboard binding that uses Super (Mod4) with an Alt
+ * (Mod1) variant. Used by --nest test mode: the host compositor usually
+ * owns Super and consumes the real keypresses, while Alt is typically
+ * unbound there. Must be called before translate_keysyms().
+ *
+ */
+void duplicate_bindings_for_nest_mode(void);
+
+/**
  * Switches the key bindings to the given mode, if the mode exists
  *
  */

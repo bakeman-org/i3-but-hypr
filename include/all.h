@@ -75,6 +75,7 @@
 #include "bindings.h"
 #include "config_directives.h"
 #include "config_parser.h"
+#include "config_watcher.h"
 #include "fake_outputs.h"
 #include "display_version.h"
 #include "restore_layout.h"

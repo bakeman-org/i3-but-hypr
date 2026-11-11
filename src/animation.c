@@ -260,7 +260,8 @@ static void animation_start_timer(void) {
 }
 
 static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
-    double now = ev_now(EV_A);
+    const double frame_start = ev_now(EV_A);
+    double now = frame_start;
     /* Only a change of the interpolated geometry requires a full tree render.
      * Opacity changes are applied directly through window properties and are
      * visible without re-rendering the layout, so pure fade animations must
@@ -315,6 +316,12 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
     if (!animation_running()) {
         ev_timer_stop(main_loop, &anim_timer);
         timer_started = false;
+    } else {
+        /* Keep a steady 60 Hz cadence: a slow render shortens the sleep
+         * instead of pushing every subsequent frame back by that amount. */
+        const double spent = ev_now(EV_A) - frame_start;
+        w->repeat = MAX(0.001, 1.0 / 60.0 - spent);
+        ev_timer_again(main_loop, w);
     }
 }
 

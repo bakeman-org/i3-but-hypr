@@ -732,6 +732,9 @@ struct Con {
     surface_t frame;
     surface_t frame_buffer;
     bool pixmap_recreated;
+    /* True when the frame_buffer content changed since the last copy to the
+     * frame pixmap. Used to skip redundant full-size CopyArea requests. */
+    bool frame_dirty;
 
     enum {
         CT_ROOT = 0,

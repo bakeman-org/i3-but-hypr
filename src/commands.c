@@ -1698,6 +1698,7 @@ void cmd_reload(I3_CMD) {
     config_error_nagbar_pid = command_error_nagbar_pid = -1;
 
     load_configuration(NULL, C_RELOAD);
+    config_watcher_rearm();
     x_set_i3_atoms();
     /* Send an IPC event just in case the ws names have changed */
     ipc_send_workspace_event("reload", NULL, NULL);

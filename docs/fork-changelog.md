@@ -52,6 +52,11 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
   行级 shape 矩形缓存（静态缓冲，避免每帧重算三角函数与分配）；
   对自带 shape 的窗口（如 xeyes）不干预，自触发 ShapeNotify 计数防误判。
 - **titlebar 内边距**：`titlebar_padding`、`titlebar_icon_padding`。
+- **Hyprland 风格标题栏**：标题文字默认居中（`title_align` 默认 `center`）；
+  标题栏底部绘制 `indicator` 颜色的 accent 细线（聚焦窗口金色高亮、
+  非聚焦暗灰）；圆角开启时标题栏背景顶部跟随圆角
+  （`draw_util_rounded_top_rectangle`）；默认配色改为深色面板
+  （背景 `#11111b` / `#181825`，文字 `#cdd6f4`，accent `#f9e2af`）。
 
 ### 5. 配置（`src/config.c`、`src/config_directives.c`、`parser-specs/config.spec`）
 
@@ -100,6 +105,20 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 - `bezier_eval` 牛顿迭代（每帧每窗口 8 次以内，可忽略）；
 - `con_get_workspace` 的 O(深度) 调用（仅事件驱动路径）。
 
+### 4. frame buffer 脏标记（`src/x.c`、`include/data.h`）
+
+`Con.frame_dirty`：仅当某容器的 frame_buffer 在本次渲染中真正被重绘
+（装饰参数变化 / pixmap 重建 / 焦点或颜色变化）才执行 CopyArea 推送到
+frame 窗口；`x_deco_recurse` 的父容器拷贝同样按脏标记门控。
+60 Hz 动画时未动的窗口零 X 流量，damage 只出现在动画窗口上，
+每帧成本从 O(全部像素) 降为 O(动画窗口像素)，嵌套 X 服务器下收益最大。
+
+### 5. 动画帧稳态调度（`src/animation.c`）
+
+帧定时器原为固定 1/60 间隔的重复定时器，渲染耗时会整体顺延后续帧。
+改为每帧结束时按"剩余预算"设置 repeat（`1/60 - 本帧渲染耗时`），
+保持 60 Hz 墙钟节拍，动画更均匀；无可动画时照旧停表零轮询。
+
 ## 三、性能画像与内存
 
 - **内存**：Xephyr 1280×800、5 窗口、渐变 + 圆角 + 动画全开，i3 RSS ≈ **35 MB**
@@ -110,7 +129,47 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
   纯 fade 场景（如 `dim_inactive` 聚焦切换）在优化后不再产生 60 Hz 重绘，
   这是 fork 在上游之上最主要的运行时 CPU 开销来源，已被消除。
 
-## 四、已知问题
+## 四、本次新增：配置热重载与 nest 测试模式
+
+### 1. 配置自动热重载（`src/config_watcher.c`、`include/config_watcher.h`，全新文件）
+
+Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c` 或 IPC reload。
+
+- **监听范围**：主配置文件 + 全部 `include` 递归引入的文件（watch 父目录的
+  `IN_MODIFY/IN_CLOSE_WRITE/IN_MOVED_TO/IN_CREATE`，过滤文件名）。
+  监听目录而非文件本身，因为编辑器常用 rename(2) 原子替换保存。
+- **防抖**：200 ms 内的多事件合并为一次 reload（vim 写入 + rename 之类的
+  事件风暴只触发一次）。
+- **先校验后应用**：reload 前先 fork+exec 自身以 `-C -c <path>` 离线校验
+  （必须在子进程做——解析失败会把存活进程的 Config 结构体写脏）。
+  校验失败：弹 i3-nagbar 报错，**保留旧配置继续运行**；修复后保存即恢复。
+- **生命周期**：初始加载后 `config_watcher_init()` 挂到 main_loop（ev_io）；
+  每次 reload（含手动 reload）后 `config_watcher_rearm()` 重建监听列表
+  （include 集合可能变化）；inotify 不可用时优雅降级为仅手动 reload。
+
+### 2. `--nest` 测试模式增强（`src/main.c`、`src/bindings.c`）
+
+`i3 --nest[=DISPLAY]`：在私有全屏 Xephyr（默认 `:99`）里跑一个完整 i3 会话，
+用于在 Hyprland 下安全测试。
+
+- **mod 冲突解决**（`duplicate_bindings_for_nest_mode()`）：Wayland 宿主的
+  键位绑定在 seat 层先于 XWayland 处理，Xephyr 抓取无法绕过；而 XKB 层面
+  交换 Alt/Super（setxkbmap altwin:swap_alt_win）在本机 TinyX Xephyr 上会
+  留下脏的兼容修饰位（state 混入 Mod1|Mod2|Mod4，XGrabKey 精确匹配永不
+  命中）。最终方案：nest 子进程设置 `I3_NEST=1` 环境变量，i3 在初始加载与
+  每次 reload 后把所有 Mod4 键位绑定自动复制一份 Mod1（Alt）变体并一并
+  translate/grab——物理 Alt 触发配置里 `$mod`（Super）的键位，配置文件
+  零改动，Hyprland 只绑 Super 故零冲突。
+- 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的
+  `/usr/local` libxkbcommon（re-exec 前置 `/usr/lib/x86_64-linux-gnu`）。
+
+### 3. 视觉默认值（`src/config.c`）
+
+开箱即 Hyprland 风格（显式配置指令始终覆盖）：`rounding 12`、
+`gaps inner 4 / outer 8`、默认边框宽 1px。回到上游观感设 `rounding 0`
+并把 gaps 归零即可。
+
+## 五、已知问题
 
 - **启动间歇性 SIGSEGV（环境问题，非代码问题）**：`load_keymap()` 崩溃于
   libxkbcommon 的 `atom_intern`。根因是本机 `/usr/local/lib` 下手工安装的

@@ -191,11 +191,11 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         x.child_border = draw_util_hex_to_color(cbackground);  \
     } while (0)
 
-    config.client.background = draw_util_hex_to_color("#000000");
-    INIT_COLOR(config.client.focused, "#4c7899", "#285577", "#ffffff", "#2e9ef4");
-    INIT_COLOR(config.client.focused_inactive, "#333333", "#5f676a", "#ffffff", "#484e50");
-    INIT_COLOR(config.client.unfocused, "#333333", "#222222", "#888888", "#292d2e");
-    INIT_COLOR(config.client.urgent, "#2f343a", "#900000", "#ffffff", "#900000");
+    config.client.background = draw_util_hex_to_color("#11111b");
+    INIT_COLOR(config.client.focused, "#181825", "#181825", "#cdd6f4", "#f9e2af");
+    INIT_COLOR(config.client.focused_inactive, "#181825", "#181825", "#a6adc8", "#313244");
+    INIT_COLOR(config.client.unfocused, "#11111b", "#11111b", "#6c7086", "#313244");
+    INIT_COLOR(config.client.urgent, "#11111b", "#181825", "#f38ba8", "#f38ba8");
     config.client.got_focused_tab_title = false;
 
     /* border and indicator color are ignored for placeholder contents */
@@ -208,13 +208,14 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
 
     config.show_marks = true;
 
-    /* Hyprland-style decorations are opt-in so that the upstream i3 look is
-     * preserved unless the user asks for rounded corners/gradients. */
-    config.rounding = 0;
+    /* Hyprland-flavored out-of-box look; explicit config directives always
+     * override these. Set rounding back to 0 for the plain upstream look. */
+    config.rounding = 12;
     config.titlebar_height = 0;
     config.titlebar_padding = 2;
     config.titlebar_hidden = false;
     config.titlebar_icon_padding = 2;
+    config.title_align = ALIGN_CENTER;
     memset(&config.client_gradients, 0, sizeof(config.client_gradients));
     config.client_gradients.focused.angle = 45;
     config.client_gradients.focused_inactive.angle = 45;
@@ -223,16 +224,16 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
 
     config.default_border = BS_NORMAL;
     config.default_floating_border = BS_NORMAL;
-    config.default_border_width = logical_px(2);
-    config.default_floating_border_width = logical_px(2);
+    config.default_border_width = logical_px(1);
+    config.default_floating_border_width = logical_px(1);
     /* Set default_orientation to NO_ORIENTATION for auto orientation. */
     config.default_orientation = NO_ORIENTATION;
 
-    config.gaps.inner = 0;
-    config.gaps.top = 0;
-    config.gaps.right = 0;
-    config.gaps.bottom = 0;
-    config.gaps.left = 0;
+    config.gaps.inner = 4;
+    config.gaps.top = 8;
+    config.gaps.right = 8;
+    config.gaps.bottom = 8;
+    config.gaps.left = 8;
 
     /* Set default urgency reset delay to 500ms */
     if (config.workspace_urgency_timer == 0) {
@@ -320,6 +321,11 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         set_font(&config.font);
     }
 
+    /* Title bars fall back to the global font when no titlebar_font was set. */
+    if (config.titlebar_font.type == FONT_TYPE_NONE) {
+        config.titlebar_font = config.font;
+    }
+
     /* Make bar config blocks without a configured font use the i3-wide font. */
     if (load_type != C_VALIDATE) {
         Barconfig *current;
@@ -332,6 +338,9 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     }
 
     if (load_type == C_RELOAD) {
+        if (getenv("I3_NEST") != NULL) {
+            duplicate_bindings_for_nest_mode();
+        }
         translate_keysyms();
         grab_all_keys(conn);
         regrab_all_buttons(conn);

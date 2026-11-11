@@ -388,6 +388,7 @@ i3srcs = [
   'src/config.c',
   'src/config_directives.c',
   'src/config_parser.c',
+  'src/config_watcher.c',
   'src/display_version.c',
   'src/drag.c',
   'src/ewmh.c',

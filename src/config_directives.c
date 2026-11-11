@@ -175,6 +175,10 @@ CFGFUN(font, const char *font) {
     set_font(&config.font);
 }
 
+CFGFUN(titlebar_font, const char *font) {
+    config.titlebar_font = load_font(font, true);
+}
+
 CFGFUN(binding, const char *bindtype, const char *modifiers, const char *key, const char *release, const char *border, const char *whole_window, const char *exclude_titlebar, const char *command) {
     configure_binding(bindtype, modifiers, key, release, border, whole_window, exclude_titlebar, command, DEFAULT_BINDING_MODE, false);
 }

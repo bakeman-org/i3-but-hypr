@@ -1947,8 +1947,8 @@ int con_titlebar_height(Con *con) {
         }
     }
 
-    int deco_height = config.font.height + 4;
-    if (config.font.height & 0x01) {
+    int deco_height = config.titlebar_font.height + 4;
+    if (config.titlebar_font.height & 0x01) {
         ++deco_height;
     }
 
