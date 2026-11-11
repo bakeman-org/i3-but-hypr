@@ -12,8 +12,8 @@ gaps_in <px>
 gaps_out <px>
 ```
 
-- 等价于标准写法 `gaps inner <n>px` / `gaps outer <n>px`。
-- 默认值与 i3 上游一致（inner 2, outer 0）。
+- 等价于标准写法 `gaps inner <n>px` / `gaps outer <n>px`，可混用（后写者生效）。
+- 默认：`gaps_in 4`、`gaps_out 8`（fork 开箱观感；上游为 inner 2 / outer 0）。
 
 ### 圆角
 
@@ -22,7 +22,7 @@ rounding <0-100>          # 亦可用别名 border_radius
 ```
 
 - 单位为逻辑像素，作用于窗口边框与标题栏的圆角。
-- 默认 `0`（直角）。
+- 默认 `12`（fork 开箱观感；回到上游直角观感设 `rounding 0`）。
 
 ### 边框宽度（Hyprland 风格别名）
 
@@ -36,13 +36,18 @@ border_size <0-100>
 ### 标题栏
 
 ```text
+titlebar_font <font>      # 例如 titlebar_font pango:monospace bold 9
 titlebar_height <0-200>
 titlebar_padding <0-100>
 titlebar normal|none
 ```
 
+- `titlebar_font`：标题栏专用字体（含字号），缺省回退全局 `font`。
+  与全局 `font` 的资源完全独立（使用点动态选择，reload 安全）。
 - `titlebar_height`：标题栏高度，`0` 表示不保留标题栏空间；默认 `0`。
+  显式设置时也不会低于字体所需高度（避免标题被裁剪）。
 - `titlebar_padding`：标题栏内边距；默认 `2`。
+  图标内边距 `titlebar_icon_padding` 是内部默认值（2px），暂无配置指令。
 - `titlebar none`：完全隐藏标题栏（Hyprland 无边框观感），同时
   将默认边框样式切换为 `pixel`；`titlebar normal` 恢复。
 
@@ -192,7 +197,32 @@ bindsym $mod+minus layoutmsg proportion -0.05
 bindsym $mod+c centerwindow
 ```
 
-## 五、兼容性说明
+## 五、默认值与热重载
+
+### 开箱默认值（Hyprland 风格）
+
+以下默认值在每次（重）加载配置时生效，显式指令始终覆盖：
+
+| 项 | 默认值 | 回到上游观感 |
+|----|--------|--------------|
+| `rounding` | `12` | `rounding 0` |
+| `gaps inner/outer` | `4 / 8` | `gaps inner 0; gaps outer 0` |
+| 默认边框宽 | `1px`（平铺与浮动） | 上游为 `2px` |
+| `title_align` | `center` | `title_align left` |
+| 标题栏配色 | 深色面板（背景 `#11111b`/`#181825`，文字 `#cdd6f4`，accent `#f9e2af`） | 用 `client.*` 颜色指令覆盖 |
+| `titlebar_font` | 回退全局 `font` | — |
+| 动画 | 总开关开，windows 180ms / open 220ms / close 150ms / workspaces 300ms，`easeOutQuint` | `animations off` |
+
+### 配置热重载（Hyprland 风格）
+
+- 保存配置文件即自动生效（inotify 监听主配置 + 全部 `include` 引入的文件），
+  无需手动 `$mod+Shift+c` 或 IPC reload；inotify 不可用时自动降级为手动 reload。
+- 200 ms 内的多次保存合并为一次 reload（防抖）。
+- **先校验后应用**：reload 前先以 `-C` 离线校验；校验失败弹出 nagbar 报错
+  并**保留旧配置继续运行**，修复后保存即自动恢复。
+- 每次 reload 后监听列表按新的 `include` 集合重建。
+
+## 六、兼容性说明
 
 - 以上全部为**增量**语法，标准 i3 配置无需修改即可继续使用。
 - `client.*_gradient` 的旧三参数语法已删除，迁移时需改为单字符串形式。

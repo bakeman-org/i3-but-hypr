@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <yajl/yajl_parse.h>
 #ifdef I3_ASAN_ENABLED
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -36,13 +37,66 @@ static bool i3_provides_workspaces(void) {
     return !config.disable_ws && config.workspace_command == NULL;
 }
 
+/* State for the reply parser below. */
+static bool reply_success = true;
+static char *reply_error = NULL;
+static bool parsing_error_key = false;
+
+static int reply_map_key(void *ctx, const unsigned char *val, size_t len) {
+    parsing_error_key = (len == strlen("error") && memcmp(val, "error", strlen("error")) == 0);
+    return 1;
+}
+
+static int reply_boolean(void *ctx, int val) {
+    parsing_error_key = false;
+    reply_success = val;
+    return 1;
+}
+
+static int reply_string(void *ctx, const unsigned char *val, size_t len) {
+    if (parsing_error_key) {
+        FREE(reply_error);
+        reply_error = sstrndup((const char *)val, len);
+    }
+    parsing_error_key = false;
+    return 1;
+}
+
+/*
+ * Command and subscribe replies are JSON objects of the form
+ * {"success": <bool>, "error": <string>?}. i3bar has no other feedback
+ * channel for its commands, so failures are surfaced in the log.
+ *
+ */
+static void check_reply_for_errors(const unsigned char *reply, size_t size) {
+    reply_success = true;
+    FREE(reply_error);
+
+    static yajl_callbacks reply_callbacks = {
+        .yajl_map_key = reply_map_key,
+        .yajl_boolean = reply_boolean,
+        .yajl_string = reply_string,
+    };
+
+    yajl_handle handle = yajl_alloc(&reply_callbacks, NULL, NULL);
+    yajl_status status = yajl_parse(handle, (const unsigned char *)reply, size);
+    if (status != yajl_status_ok) {
+        unsigned char *err = yajl_get_error(handle, 1, (const unsigned char *)reply, size);
+        ELOG("Could not parse i3 reply: %s\n", err ? (const char *)err : "(unknown)");
+        yajl_free_error(handle, err);
+    } else if (!reply_success) {
+        ELOG("i3 replied with an error: %s\n", reply_error ? reply_error : "(no error message)");
+    }
+    yajl_free(handle);
+    FREE(reply_error);
+}
+
 /*
  * Called, when we get a reply to a command from i3.
- * Since i3 does not give us much feedback on commands, we do not much
  *
  */
 static void got_command_reply(const unsigned char *reply, size_t size) {
-    /* TODO: Error handling for command replies */
+    check_reply_for_errors(reply, size);
 }
 
 /*
@@ -62,7 +116,7 @@ static void got_workspace_reply(const unsigned char *reply, size_t size) {
  */
 static void got_subscribe_reply(const unsigned char *reply, size_t size) {
     DLOG("Got subscribe reply: %s\n", reply);
-    /* TODO: Error handling for subscribe commands */
+    check_reply_for_errors(reply, size);
 }
 
 /*

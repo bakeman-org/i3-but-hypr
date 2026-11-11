@@ -1222,9 +1222,9 @@ static void con_set_fullscreen_mode(Con *con, fullscreen_mode_t fullscreen_mode)
     /* Send an ipc window "fullscreen_mode" event */
     ipc_send_window_event("fullscreen_mode", con);
 
-    /* update _NET_WM_STATE if this container has a window */
-    /* TODO: when a window is assigned to a container which is already
-     * fullscreened, this state needs to be pushed to the client, too */
+    /* update _NET_WM_STATE if this container has a window. Windows placed
+     * into a container that was already fullscreen (while empty) get their
+     * state pushed in manage_window() instead. */
     if (con->window == NULL) {
         return;
     }
@@ -1947,8 +1947,11 @@ int con_titlebar_height(Con *con) {
         }
     }
 
-    int deco_height = config.titlebar_font.height + 4;
-    if (config.titlebar_font.height & 0x01) {
+    const i3Font *titlebar_font = (config.titlebar_font.type != FONT_TYPE_NONE)
+                                      ? &config.titlebar_font
+                                      : &config.font;
+    int deco_height = titlebar_font->height + 4;
+    if (titlebar_font->height & 0x01) {
         ++deco_height;
     }
 

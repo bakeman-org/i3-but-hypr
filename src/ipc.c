@@ -251,9 +251,9 @@ static void dump_gaps(yajl_gen gen, const char *name, gaps_t gaps) {
     ystr("inner");
     y(integer, gaps.inner);
 
-    // TODO: the i3ipc Python modules recognize gaps, but only inner/outer
-    // This is currently here to preserve compatibility with that
-    ystr("outer");
+    // The i3ipc Python modules only understand the "inner"/"outer" fields;
+    // "outer" is reported as the top gap to preserve compatibility with
+    // them. The precise per-edge gaps follow below.
     y(integer, gaps.top);
 
     ystr("top");

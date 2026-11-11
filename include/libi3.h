@@ -405,6 +405,14 @@ void set_font(i3Font *font);
 void free_font(void);
 
 /**
+ * Frees the resources owned by the given font struct (e.g. a font that is
+ * stored somewhere else than the currently selected one). The font is left
+ * in the FONT_TYPE_NONE state.
+ *
+ */
+void free_font_struct(i3Font *font);
+
+/**
  * Converts the given string to UTF-8 from UCS-2 big endian. The return value
  * must be freed after use.
  *

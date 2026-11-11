@@ -145,6 +145,11 @@ static void free_configuration(void) {
     /* Get rid of the current font */
     free_font();
 
+    /* An explicitly configured titlebar font owns its resources
+     * independently of the global font; a reload discards the whole
+     * configuration, so release them here as well. */
+    free_font_struct(&config.titlebar_font);
+
     free(config.ipc_socket_path);
     free(config.restart_state_path);
     free(config.fake_outputs);
@@ -321,10 +326,9 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         set_font(&config.font);
     }
 
-    /* Title bars fall back to the global font when no titlebar_font was set. */
-    if (config.titlebar_font.type == FONT_TYPE_NONE) {
-        config.titlebar_font = config.font;
-    }
+    /* Title bars fall back to the global font when no titlebar_font was
+     * set; the use sites select the font dynamically, so no ownership is
+     * shared here. */
 
     /* Make bar config blocks without a configured font use the i3-wide font. */
     if (load_type != C_VALIDATE) {

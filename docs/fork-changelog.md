@@ -51,7 +51,13 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 - **圆角**：`rounding <px>`，通过 X Shape 扩展对 frame 和 client 同时裁剪；
   行级 shape 矩形缓存（静态缓冲，避免每帧重算三角函数与分配）；
   对自带 shape 的窗口（如 xeyes）不干预，自触发 ShapeNotify 计数防误判。
-- **titlebar 内边距**：`titlebar_padding`、`titlebar_icon_padding`。
+- **titlebar 内边距**：`titlebar_padding <0-100>`（图标内边距为内部默认值 2px）。
+- **独立标题栏字体**：`titlebar_font <font>`（缺省回退全局 `font`）。
+  所有权与全局字体分离：`load_font()` 的隐式 `free_font()` 只释放
+  `savedFont`，`CFGFUN(titlebar_font)` 会先把释放目标重定向到被替换的
+  旧标题栏字体再恢复，避免把全局 `font` 的 pango 资源提前释放
+  （UAF/double-free）；回退路径不做浅拷贝，由使用点动态选择字体
+  （新增 `libi3` 的 `free_font_struct()`，reload 时释放独立资源）。
 - **Hyprland 风格标题栏**：标题文字默认居中（`title_align` 默认 `center`）；
   标题栏底部绘制 `indicator` 颜色的 accent 细线（聚焦窗口金色高亮、
   非聚焦暗灰）；圆角开启时标题栏背景顶部跟随圆角
@@ -169,7 +175,38 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 `gaps inner 4 / outer 8`、默认边框宽 1px。回到上游观感设 `rounding 0`
 并把 gaps 归零即可。
 
-## 五、已知问题
+## 五、上游 TODO 处理状态
+
+对仓库内全部上游遗留 TODO（`grep -irn 'TODO'`）逐条评估，结果分三类。
+
+### 已修复（本次）
+
+| TODO 位置 | 处理 |
+|-----------|------|
+| `src/x.c:1309`（零尺寸进入 pixmap 创建路径） | pixmap 创建条件补上 `rect.width > 0 && rect.height > 0`，零尺寸容器（不可见）不再创建 1×1 兜底 pixmap；`MAX(...,1)` 保留为防御措施 |
+| `src/x.c:1336`（L_TABBED 是否同样处理） | 答案固化进注释：**否**——tabbed 布局所有 tab 装饰均可见，全部子容器需立即渲染装饰；stacked 仅焦点子容器可见 |
+| `src/con.c:1226`（分配到已全屏容器时不推送状态） | `manage_window()` 在放置后检测 `nc->fullscreen_mode != CF_NONE` 且窗口自身未请求全屏时补推 `_NET_WM_STATE`（避免与 `con_toggle_fullscreen` 路径重复 APPEND atom） |
+| `i3bar/src/ipc.c:45`（命令 reply 错误处理） | 新增 `check_reply_for_errors()`：yajl 解析 `{"success","error"}`，失败打 ELOG（命令与订阅 reply 共用） |
+| `i3bar/src/ipc.c:65`（订阅 reply 错误处理） | 同上 |
+| `src/ipc.c:254`（gaps "outer" 字段兼容性） | 无需改行为（i3ipc 兼容是刻意为之），注释固化为设计说明 |
+| `include/scratchpad.h:7`（缺描述） | 补全头文件说明 |
+
+### 已知决策、维持现状
+
+- `src/x.c:1520` `is_con_attached`：等待上游修复 #1185 后移除，fork 不先行删除。
+- `src/restore_layout.c:178`（watch 符号更大字体）：装饰性小项，涉及加载
+  第二套字体，收益低；恢复布局界面仅短暂可见。
+
+### 架构级重构，fork 不处理（与 fork 目标无关）
+
+`tree.c:82/470`、`con.c:530/607/977/1574/2304`、`load_layout.c:17`、
+`commands_parser.c:180/267`、`render.c:433`、`randr.c:856`、`x.c:109/142`、
+`floating.c:284`、`restore_layout.c:135`、`include/tree.h:15`、
+`include/con.h:266/368`、`parser-specs/config.spec:12`、
+`contrib/gtk-tree-watch.pl:185`——均为上游作者留的通用性重构备忘
+（遍历算法、解析器可测试性、per-connection 字体等），改动风险大于收益。
+
+## 六、已知问题
 
 - **启动间歇性 SIGSEGV（环境问题，非代码问题）**：`load_keymap()` 崩溃于
   libxkbcommon 的 `atom_intern`。根因是本机 `/usr/local/lib` 下手工安装的

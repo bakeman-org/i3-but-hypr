@@ -4,7 +4,9 @@
  * i3 - an improved tiling window manager
  * © 2009 Michael Stapelberg and contributors (see also: LICENSE)
  *
- * scratchpad.c: Scratchpad functions (TODO: more description)
+ * scratchpad.c: Scratchpad functions. The scratchpad is a hidden workspace
+ * (__i3_scratch) on which windows are made floating and invisible; showing
+ * a scratchpad window temporarily overlays it on the current workspace.
  *
  */
 #pragma once

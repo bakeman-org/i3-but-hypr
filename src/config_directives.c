@@ -176,7 +176,13 @@ CFGFUN(font, const char *font) {
 }
 
 CFGFUN(titlebar_font, const char *font) {
+    /* load_font() implicitly frees the currently *saved* font, which is
+     * the global font while parsing — freeing it here would leave
+     * config.font dangling. Temporarily redirect the free to the titlebar
+     * font this directive replaces, then restore the global font. */
+    set_font(&config.titlebar_font);
     config.titlebar_font = load_font(font, true);
+    set_font(&config.font);
 }
 
 CFGFUN(binding, const char *bindtype, const char *modifiers, const char *key, const char *release, const char *border, const char *whole_window, const char *exclude_titlebar, const char *command) {

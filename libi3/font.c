@@ -289,6 +289,33 @@ void free_font(void) {
 }
 
 /*
+ * Frees the resources owned by the given font struct, e.g. a font that is
+ * stored outside of the currently selected one (set_font). The font is
+ * left in the FONT_TYPE_NONE state.
+ *
+ */
+void free_font_struct(i3Font *font) {
+    free(font->pattern);
+    font->pattern = NULL;
+    switch (font->type) {
+        case FONT_TYPE_NONE:
+            /* Nothing to do */
+            break;
+        case FONT_TYPE_XCB: {
+            /* Close the font and free the info */
+            xcb_close_font(conn, font->specific.xcb.id);
+            free(font->specific.xcb.info);
+            break;
+        }
+        case FONT_TYPE_PANGO:
+            /* Free the font description */
+            pango_font_description_free(font->specific.pango_desc);
+            break;
+    }
+    font->type = FONT_TYPE_NONE;
+}
+
+/*
  * Defines the colors to be used for the forthcoming draw_text calls.
  *
  */

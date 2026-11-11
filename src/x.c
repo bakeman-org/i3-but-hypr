@@ -717,8 +717,11 @@ void x_draw_decoration(Con *con) {
     x_draw_title_border(con, p, dest_surface);
 
     /* 6: draw the icon and title, using the dedicated titlebar font if set */
-    set_font(&config.titlebar_font);
-    int text_offset_y = (con->deco_rect.height - config.titlebar_font.height) / 2;
+    i3Font *titlebar_font = (config.titlebar_font.type != FONT_TYPE_NONE)
+                                ? &config.titlebar_font
+                                : &config.font;
+    set_font(titlebar_font);
+    int text_offset_y = (con->deco_rect.height - titlebar_font->height) / 2;
 
     struct Window *win = con->window;
 
@@ -1289,7 +1292,8 @@ void x_push_node(Con *con) {
             con->frame_buffer.id = XCB_NONE;
         }
 
-        if (is_pixmap_needed && (has_rect_changed || con->frame_buffer.id == XCB_NONE)) {
+        if (is_pixmap_needed && (has_rect_changed || con->frame_buffer.id == XCB_NONE) &&
+            rect.width > 0 && rect.height > 0) {
             if (con->frame_buffer.id == XCB_NONE) {
                 con->frame_buffer.id = xcb_generate_id(conn);
             } else {
@@ -1302,10 +1306,10 @@ void x_push_node(Con *con) {
                 win_depth = con->window->depth;
             }
 
-            /* Ensure we have valid dimensions for our surface. */
-            /* TODO: This is probably a bug in the condition above as we should
-             * never enter this path for height == 0. Also, we should probably
-             * handle width == 0 the same way. */
+            /* Ensure we have valid dimensions for our surface. Zero-sized
+             * containers never enter this path (see the condition above):
+             * X requires dimensions >= 1, so the clamps below are only a
+             * defensive measure. */
             int width = MAX((int32_t)rect.width, 1);
             int height = MAX((int32_t)rect.height, 1);
 
@@ -1329,8 +1333,9 @@ void x_push_node(Con *con) {
             con->frame_dirty = true;
 
             /* Don’t render the decoration for windows inside a stack which are
-             * not visible right now
-             * TODO: Should this work the same way for L_TABBED? */
+             * not visible right now. This deliberately does NOT apply to
+             * L_TABBED: there, every tab decoration is visible, so all
+             * children need their decoration rendered eagerly. */
             if (!con->parent ||
                 con->parent->layout != L_STACKED ||
                 TAILQ_FIRST(&(con->parent->focus_head)) == con) {

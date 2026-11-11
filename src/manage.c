@@ -420,6 +420,19 @@ void manage_window(xcb_window_t window, xcb_get_window_attributes_cookie_t cooki
         fs = NULL;
     }
 
+    /* If the window was placed into a container that is already fullscreen
+     * (e.g. a placeholder from a stored layout that went fullscreen while
+     * still empty), the fullscreen state was never pushed to the client —
+     * con_set_fullscreen_mode() skips containers without a window. Push it
+     * now so the client reflects the actual state. Skip the push when the
+     * window itself requested fullscreen: that path above already pushed
+     * the state via con_toggle_fullscreen(). */
+    if (nc->fullscreen_mode != CF_NONE &&
+        !xcb_reply_contains_atom(state_reply, A__NET_WM_STATE_FULLSCREEN)) {
+        DLOG("Pushing _NET_WM_STATE_FULLSCREEN to window = %d.\n", nc->window->id);
+        xcb_add_property_atom(conn, nc->window->id, A__NET_WM_STATE, A__NET_WM_STATE_FULLSCREEN);
+    }
+
     bool set_focus = false;
 
     if (fs == NULL) {
