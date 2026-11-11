@@ -537,6 +537,11 @@ struct Window {
     bool shaped;
     /** The window has a nonrectangular input shape. */
     bool input_shaped;
+    /** Number of bounding shapes that i3 itself applied to the window
+     * (rounded corners) and whose ShapeNotify event has not been seen yet.
+     * Those events must not be interpreted as "the client brought its own
+     * shape". */
+    int own_shape_notifies;
 
     /* Time when the window became managed. Used to determine whether a window
      * should be swallowed after initial management. */

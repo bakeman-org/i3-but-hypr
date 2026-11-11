@@ -1471,6 +1471,17 @@ void handle_event(int type, xcb_generic_event_t *event) {
             return;
         }
 
+        /* i3 shapes client windows itself to get rounded corners. Those shape
+         * changes are reported back to us; treating them like a shape the
+         * client installed would permanently disable the rounded corners
+         * (the client would keep the shape of whatever size it had at that
+         * moment, leaving the decoration visible next to it). */
+        if (shape->shape_kind == XCB_SHAPE_SK_BOUNDING && shape->shaped &&
+            con->window != NULL && con->window->own_shape_notifies > 0) {
+            con->window->own_shape_notifies--;
+            return;
+        }
+
         if (shape->shape_kind == XCB_SHAPE_SK_BOUNDING ||
             shape->shape_kind == XCB_SHAPE_SK_INPUT) {
             x_set_shape(con, shape->shape_kind, shape->shaped);

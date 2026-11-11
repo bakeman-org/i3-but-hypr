@@ -939,9 +939,19 @@ static int decoration_radius(void) {
  * window decorations.
  *
  */
-static void x_set_rounded_shape(xcb_window_t window, int width, int height, int radius) {
+static void x_set_rounded_shape(xcb_window_t window, int width, int height, int radius, i3Window *client) {
     if (width <= 0 || height <= 0) {
         return;
+    }
+
+    /* The X server sends a ShapeNotify event for every shape we set on a
+     * client window, because i3 selected ShapeNotify on all managed windows.
+     * Remember how many of those events we caused ourselves so that
+     * handle_shape_notify() does not mistake them for a shape the client
+     * installed on its own (which would disable our rounded corners for
+     * good). */
+    if (client != NULL) {
+        client->own_shape_notifies++;
     }
 
     if (radius <= 0) {
@@ -1024,14 +1034,14 @@ static void x_apply_rounding(Con *con, con_state *state) {
         return;
     }
 
-    x_set_rounded_shape(con->frame.id, con->rect.width, con->rect.height, radius);
+    x_set_rounded_shape(con->frame.id, con->rect.width, con->rect.height, radius, NULL);
 
     /* Never touch windows which bring their own shape (e.g. xeyes). */
     if (con->window != NULL && !con->window->shaped) {
         const Rect bsr = con_border_style_rect(con);
         const int inner_radius = MAX(0, radius - bsr.x);
         x_set_rounded_shape(con->window->id, con->window_rect.width,
-                            con->window_rect.height, inner_radius);
+                            con->window_rect.height, inner_radius, con->window);
     }
 }
 

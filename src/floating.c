@@ -28,6 +28,12 @@ static Rect total_outputs_dimensions(void) {
     /* Use Rect to encapsulate dimensions, ignoring x/y */
     Rect outputs_dimensions = {0, 0, 0, 0};
     TAILQ_FOREACH (output, &outputs, outputs) {
+        /* Skip internal outputs such as __i3; otherwise their size would
+         * inflate the sum and floating windows would no longer be clamped
+         * to the real screen size. */
+        if (output->con != NULL && con_is_internal(output->con)) {
+            continue;
+        }
         outputs_dimensions.height += output->rect.height;
         outputs_dimensions.width += output->rect.width;
     }
@@ -365,6 +371,18 @@ bool floating_enable(Con *con, bool automatic) {
     nc->rect.width += con->border_width * 2;
 
     floating_check_size(nc, false);
+
+    /* Make sure the floating window (including its decoration) fits on the
+     * workspace it is on. Otherwise the title bar ends up off-screen and the
+     * window seems to have no decoration at all (this happens for clients
+     * which map themselves larger than the screen, e.g. with a stale
+     * WM_SIZE_HINTS geometry). */
+    if (nc->rect.width > ws->rect.width) {
+        nc->rect.width = ws->rect.width;
+    }
+    if (nc->rect.height > ws->rect.height) {
+        nc->rect.height = ws->rect.height;
+    }
 
     /* Some clients (like GIMP’s color picker window) get mapped
      * to (0, 0), so we push them to a reasonable position
