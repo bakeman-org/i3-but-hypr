@@ -330,6 +330,17 @@ void tree_split(Con *con, orientation_t orientation) {
         return;
     }
 
+    /* In the dwindle and master layouts the layout algorithm itself decides
+     * where a new container goes, so splitting would only create redundant
+     * nested containers. */
+    if (con->type == CT_CON && con->parent != NULL &&
+        (con->parent->layout == L_DWINDLE || con->parent->layout == L_MASTER ||
+         con->parent->layout == L_SCROLLER)) {
+        DLOG("Layout %d computes splits itself, not creating a nested container.\n",
+             con->parent->layout);
+        return;
+    }
+
     if (con->type == CT_WORKSPACE) {
         if (con_num_children(con) < 2) {
             if (con_num_children(con) == 0) {
@@ -500,11 +511,101 @@ static Con *get_tree_next_workspace(Con *con, direction_t direction) {
  * are respected.
  *
  */
+/*
+ * Finds the closest leaf container in the given direction by looking at the
+ * rendered rectangles. The dwindle and master layouts do not have a single
+ * split orientation, so the tree structure alone is not enough to determine
+ * where the focus should go.
+ *
+ */
+static Con *get_tree_next_geometric(Con *con, direction_t direction) {
+    Con *workspace = con_get_workspace(con);
+    if (workspace == NULL) {
+        return NULL;
+    }
+
+    Con *best = NULL;
+    long best_distance = LONG_MAX;
+
+    Con *candidate;
+    TAILQ_FOREACH (candidate, &all_cons, all_cons) {
+        if (candidate == con || candidate->type != CT_CON || !con_is_leaf(candidate)) {
+            continue;
+        }
+        if (!candidate->mapped || con_get_workspace(candidate) != workspace) {
+            continue;
+        }
+        if (con_inside_floating(candidate) || !con_fullscreen_permits_focusing(candidate)) {
+            continue;
+        }
+
+        const Rect a = con->rect;
+        const Rect b = candidate->rect;
+        const long perpendicular = labs((b.y + b.height / 2) - (a.y + a.height / 2));
+        const long perpendicular_x = labs((b.x + b.width / 2) - (a.x + a.width / 2));
+        long distance;
+
+        switch (direction) {
+            case D_LEFT:
+                if (b.x + b.width > a.x) {
+                    continue;
+                }
+                distance = (a.x - (b.x + b.width)) + 4 * perpendicular;
+                break;
+            case D_RIGHT:
+                if (b.x < a.x + a.width) {
+                    continue;
+                }
+                distance = (b.x - (a.x + a.width)) + 4 * perpendicular;
+                break;
+            case D_UP:
+                if (b.y + b.height > a.y) {
+                    continue;
+                }
+                distance = (a.y - (b.y + b.height)) + 4 * perpendicular_x;
+                break;
+            case D_DOWN:
+                if (b.y < a.y + a.height) {
+                    continue;
+                }
+                distance = (b.y - (a.y + a.height)) + 4 * perpendicular_x;
+                break;
+            default:
+                continue;
+        }
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = candidate;
+        }
+    }
+
+    return best;
+}
+
+/*
+ * Returns true if the given layout computes the geometry of its children from
+ * the rectangles instead of a single split orientation.
+ *
+ */
+static bool layout_is_geometric(layout_t layout) {
+    return layout == L_DWINDLE || layout == L_MASTER || layout == L_SCROLLER;
+}
+
 static Con *get_tree_next(Con *con, direction_t direction) {
     const bool previous = position_from_direction(direction) == BEFORE;
     const orientation_t orientation = orientation_from_direction(direction);
 
     Con *first_wrap = NULL;
+
+    /* dwindle/master: use the geometry of the (already rendered) containers */
+    if (con->type == CT_CON && !con_is_floating(con) && con->parent != NULL &&
+        layout_is_geometric(con->parent->layout)) {
+        Con *next = get_tree_next_geometric(con, direction);
+        if (next != NULL) {
+            return next;
+        }
+    }
 
     if (con->type == CT_WORKSPACE) {
         /* Special case for FOCUS_WRAPPING_WORKSPACE: allow the focus to leave

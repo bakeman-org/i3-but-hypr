@@ -471,6 +471,13 @@ adjacent_t con_adjacent_borders(Con *con);
 int con_border_style(Con *con);
 
 /**
+ * Returns the height of the title bar of the given container (0 when the
+ * title bar is hidden).
+ *
+ */
+int con_titlebar_height(Con *con);
+
+/**
  * Sets the given border style on con, correctly keeping the position/size of a
  * floating window.
  *
@@ -587,3 +594,10 @@ void con_merge_into(Con *old, Con *new);
  *
  */
 bool con_inside_stacked_or_tabbed(Con *con);
+
+/**
+ * Sets the layout of the given container directly (no parent hop, no wrapper
+ * containers). Used for the workspace-wide dwindle/master layouts.
+ *
+ */
+void con_set_layout_direct(Con *con, layout_t layout);

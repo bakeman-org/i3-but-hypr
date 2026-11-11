@@ -631,6 +631,19 @@ void draw_util_image(cairo_surface_t *image, surface_t *surface, int x, int y, i
 void draw_util_rectangle(surface_t *surface, color_t color, double x, double y, double w, double h);
 
 /**
+ * Draws a filled rectangle with rounded corners.
+ *
+ */
+void draw_util_rounded_rectangle(surface_t *surface, color_t color, double x, double y, double w, double h, double radius);
+
+/**
+ * Draws a filled rectangle with rounded corners, filled with a linear
+ * gradient from start to end. angle is given in degrees (0 = left to right).
+ *
+ */
+void draw_util_gradient_rounded_rectangle(surface_t *surface, color_t start, color_t end, double angle, double x, double y, double w, double h, double radius);
+
+/**
  * Clears a surface with the given color.
  *
  */

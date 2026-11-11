@@ -8,6 +8,7 @@
  */
 #include "libi3.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -330,4 +331,86 @@ void draw_util_copy_surface(surface_t *src, surface_t *dest, double src_x, doubl
     CAIRO_SURFACE_FLUSH(dest->surface);
 
     cairo_restore(dest->cr);
+}
+
+/*
+ * Builds a rounded rectangle path at the current cairo position.
+ *
+ */
+static void draw_util_rounded_rect_path(cairo_t *cr, double x, double y, double w, double h, double radius) {
+    if (radius < 0.0) {
+        radius = 0.0;
+    }
+
+    const double max_radius = MIN(w, h) / 2.0;
+    if (radius > max_radius) {
+        radius = max_radius;
+    }
+
+    const double right = x + w;
+    const double bottom = y + h;
+
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, right - radius, y + radius, radius, -M_PI_2, 0);
+    cairo_arc(cr, right - radius, bottom - radius, radius, 0, M_PI_2);
+    cairo_arc(cr, x + radius, bottom - radius, radius, M_PI_2, M_PI);
+    cairo_arc(cr, x + radius, y + radius, radius, M_PI, 3 * M_PI_2);
+    cairo_close_path(cr);
+}
+
+/*
+ * Draws a filled rectangle with rounded corners.
+ *
+ */
+void draw_util_rounded_rectangle(surface_t *surface, color_t color, double x, double y, double w, double h, double radius) {
+    if (!surface_initialized(surface)) {
+        return;
+    }
+
+    cairo_save(surface->cr);
+    cairo_set_operator(surface->cr, CAIRO_OPERATOR_SOURCE);
+    draw_util_set_source_color(surface, color);
+
+    draw_util_rounded_rect_path(surface->cr, x, y, w, h, radius);
+    cairo_fill(surface->cr);
+
+    CAIRO_SURFACE_FLUSH(surface->surface);
+    cairo_restore(surface->cr);
+}
+
+/*
+ * Draws a filled rectangle with rounded corners, filled with a linear
+ * gradient.
+ *
+ */
+void draw_util_gradient_rounded_rectangle(surface_t *surface, color_t start, color_t end, double angle, double x, double y, double w, double h, double radius) {
+    if (!surface_initialized(surface)) {
+        return;
+    }
+
+    const double radians = angle * M_PI / 180.0;
+    const double dx = cos(radians);
+    const double dy = sin(radians);
+    const double cx = x + w / 2.0;
+    const double cy = y + h / 2.0;
+    /* Half of the length of the gradient, i.e. the projection of the
+     * rectangle onto the gradient direction. */
+    const double length = (fabs(w * dx) + fabs(h * dy)) / 2.0;
+
+    cairo_pattern_t *pattern = cairo_pattern_create_linear(
+        cx - dx * length, cy - dy * length,
+        cx + dx * length, cy + dy * length);
+    cairo_pattern_add_color_stop_rgba(pattern, 0.0, start.red, start.green, start.blue, start.alpha);
+    cairo_pattern_add_color_stop_rgba(pattern, 1.0, end.red, end.green, end.blue, end.alpha);
+
+    cairo_save(surface->cr);
+    cairo_set_operator(surface->cr, CAIRO_OPERATOR_SOURCE);
+
+    draw_util_rounded_rect_path(surface->cr, x, y, w, h, radius);
+    cairo_set_source(surface->cr, pattern);
+    cairo_fill(surface->cr);
+
+    CAIRO_SURFACE_FLUSH(surface->surface);
+    cairo_restore(surface->cr);
+    cairo_pattern_destroy(pattern);
 }

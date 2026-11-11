@@ -49,6 +49,7 @@
 #include "floating.h"
 #include "gaps.h"
 #include "drag.h"
+#include "animation.h"
 #include "configuration.h"
 #include "handlers.h"
 #include "randr.h"

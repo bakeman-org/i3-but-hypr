@@ -454,6 +454,15 @@ void dump_node(yajl_gen gen, Con *con, bool inplace_restart) {
         case L_TABBED:
             ystr("tabbed");
             break;
+        case L_DWINDLE:
+            ystr("dwindle");
+            break;
+        case L_MASTER:
+            ystr("master");
+            break;
+        case L_SCROLLER:
+            ystr("scroller");
+            break;
         case L_DOCKAREA:
             ystr("dockarea");
             break;
@@ -473,8 +482,23 @@ void dump_node(yajl_gen gen, Con *con, bool inplace_restart) {
         case L_TABBED:
             ystr("tabbed");
             break;
+        case L_DWINDLE:
+            ystr("dwindle");
+            break;
+        case L_MASTER:
+            ystr("master");
+            break;
+        case L_SCROLLER:
+            ystr("scroller");
+            break;
+        case L_SPLITH:
+            ystr("splith");
+            break;
+        case L_SPLITV:
+            ystr("splitv");
+            break;
         default:
-            DLOG("About to dump workspace_layout=%d (none of default/stacked/tabbed), this is a bug.\n", con->workspace_layout);
+            DLOG("About to dump workspace_layout=%d, this is a bug.\n", con->workspace_layout);
             assert(false);
             break;
     }

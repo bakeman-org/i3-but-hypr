@@ -564,6 +564,22 @@ void workspace_show(Con *workspace) {
 
     /* Push any sticky windows to the now visible workspace. */
     output_push_sticky_windows(old_focus);
+
+    /* Slide the new workspace in from the direction we are moving to
+     * (Hyprland-style workspace animation). */
+    if (config.animations && old != NULL && old != workspace) {
+        Con *output = con_get_output(workspace);
+        int width = output ? output->rect.width : 0;
+        if (width <= 0) {
+            width = workspace->rect.width;
+        }
+        if (width > 0) {
+            const bool forward = (old->num < 0 || workspace->num < 0)
+                                     ? true
+                                     : workspace->num > old->num;
+            animation_slide_in(workspace, forward ? width : -width);
+        }
+    }
 }
 
 /*
@@ -999,6 +1015,20 @@ Con *workspace_attach_to(Con *ws) {
     if (ws->workspace_layout == L_DEFAULT) {
         DLOG("Default layout, just attaching it to the workspace itself.\n");
         return ws;
+    }
+
+    /* The dwindle and master layouts use a single container that holds all
+     * windows of the workspace, so reuse it if it already exists. */
+    if (ws->workspace_layout == L_DWINDLE || ws->workspace_layout == L_MASTER ||
+        ws->workspace_layout == L_SCROLLER) {
+        Con *child;
+        TAILQ_FOREACH (child, &(ws->nodes_head), nodes) {
+            if (child->type == CT_CON && child->window == NULL &&
+                child->layout == ws->workspace_layout) {
+                DLOG("Reusing existing layout container %p\n", child);
+                return child;
+            }
+        }
     }
 
     DLOG("Non-default layout, creating a new split container\n");

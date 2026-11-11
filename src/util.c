@@ -103,6 +103,18 @@ bool layout_from_name(const char *layout_str, layout_t *out) {
         *out = L_SPLITH;
         return true;
     }
+    if (strcasecmp(layout_str, "dwindle") == 0) {
+        *out = L_DWINDLE;
+        return true;
+    }
+    if (strcasecmp(layout_str, "master") == 0) {
+        *out = L_MASTER;
+        return true;
+    }
+    if (strcasecmp(layout_str, "scroller") == 0) {
+        *out = L_SCROLLER;
+        return true;
+    }
 
     return false;
 }

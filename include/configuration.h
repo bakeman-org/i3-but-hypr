@@ -47,6 +47,19 @@ struct context {
 };
 
 /**
+ * A linear gradient used for window borders (Hyprland's
+ * decoration:col.active_border).
+ *
+ */
+struct gradient_spec {
+    bool enabled;
+    color_t start;
+    color_t end;
+    /* Direction of the gradient in degrees, 0 = left to right. */
+    int angle;
+};
+
+/**
  * Part of the struct Config. It makes sense to group colors for background,
  * border and text as every element in i3 has them (window decorations, bar).
  *
@@ -218,6 +231,28 @@ struct Config {
         ALIGN_RIGHT
     } title_align;
 
+    /* Radius of the rounded window corners in pixels (Hyprland's
+     * decoration:rounding). 0 keeps the classic square corners. */
+    int rounding;
+    /* Height of the title bar in pixels, 0 means "derive from the font". */
+    int titlebar_height;
+    /* Horizontal padding between the title text and the window edges. */
+    int titlebar_padding;
+    /* Whether the title bar is drawn at all ("titlebar none"). */
+    bool titlebar_hidden;
+    /* Horizontal padding of the window icon. */
+    int titlebar_icon_padding;
+
+    /* Optional linear gradient borders, per client state. When a gradient is
+     * enabled the border of that state is painted with it instead of the
+     * solid border color. */
+    struct {
+        struct gradient_spec focused;
+        struct gradient_spec focused_inactive;
+        struct gradient_spec unfocused;
+        struct gradient_spec urgent;
+    } client_gradients;
+
     /** The default border style for new windows. */
     border_style_t default_border;
 
@@ -280,6 +315,64 @@ struct Config {
 
     /* Disable gaps if there is only one container on the workspace */
     smart_gaps_t smart_gaps;
+
+    /* Whether smooth geometry animations are enabled (Hyprland-style). */
+    bool animations;
+
+    /* Animation durations in milliseconds. */
+    int animation_duration;
+    int animation_workspace_duration;
+    int animation_open_duration;
+    int animation_close_duration;
+
+    /* Name of the bezier curve used when a container's geometry changes. */
+    char animation_curve[64];
+    /* Name of the bezier curve used when switching workspaces. */
+    char animation_workspace_curve[64];
+    /* Name of the bezier curve used when a window opens/closes. */
+    char animation_open_curve[64];
+    char animation_close_curve[64];
+    /* Whether new windows fade in (Hyprland's fadeIn). */
+    bool animation_fade;
+
+    /* Fraction of the width used by the master area in the master layout. */
+    double master_ratio;
+    /* Where the master area is placed: 0 = left, 1 = right, 2 = top,
+     * 3 = bottom. */
+    int master_orientation;
+
+    /* Fraction of the tile that the first (upper/left) part of a dwindle
+     * split occupies (mangowc's dwindle_split_ratio). */
+    double dwindle_split_ratio;
+
+    /* Scroller layout (ported from mangowc): every container is a column
+     * whose width is a fraction of the available monitor width. */
+    double scroller_proportion;
+    /* Space kept free on both sides of the scroller area. */
+    int scroller_structs;
+    /* Always center the focused column instead of only scrolling when it
+     * would leave the visible area. */
+    bool scroller_focus_center;
+    /* Center the focused column as soon as it would not be fully visible. */
+    bool scroller_prefer_center;
+    /* Let the first/last column use the whole width instead of its
+     * proportion. */
+    bool scroller_prefer_overspread;
+    /* Whether the proportion is also applied when only a single window is
+     * visible (mangowc's scroller_ignore_proportion_single, inverted). */
+    bool scroller_proportion_single;
+    /* Proportion used for the single-window case. */
+    double scroller_default_proportion_single;
+
+    /* Opacity applied to windows (requires a compositing manager to have a
+     * visible effect). active_opacity is used for the focused window,
+     * inactive_opacity for all others. */
+    double active_opacity;
+    double inactive_opacity;
+
+    /* Multiply the opacity of non-focused windows on an output with focus. */
+    bool dim_inactive;
+    double dim_strength;
 };
 
 /**

@@ -713,12 +713,124 @@ start.
 
 *Syntax*:
 ---------------------------------------------
-workspace_layout default|stacking|tabbed
+workspace_layout default|stacking|tabbed|dwindle|master
 ---------------------------------------------
 
 *Example*:
 ---------------------
 workspace_layout tabbed
+---------------------
+
+[[dwindle_master]]
+=== Dwindle and master layouts
+
+In addition to i3's classic split layouts, two Hyprland-style layouts are
+available. They are workspace-wide layouts: all windows of a workspace live in
+one container whose layout is either +dwindle+ or +master+.
+
+dwindle::
+Every new window splits the remaining space in half, alternating between a
+horizontal and a vertical split. This produces the characteristic staircase
+arrangement and needs no manual +split+ commands.
+master::
+The first window (the "master") occupies +master_ratio+ of the workspace, all
+other windows are stacked next to it. Use +layoutmsg orientationleft+,
++orientationright+, +orientationtop+ or +orientationbottom+ to choose where the
+master area is placed.
+
+Both layouts are selected with the +layout+ command or as the default for new
+workspaces:
+
+*Syntax*:
+---------------------------------------------
+layout dwindle|master
+workspace_layout dwindle|master
+master_ratio <0.1 - 0.9>
+---------------------------------------------
+
+*Example*:
+---------------------
+workspace_layout dwindle
+master_ratio 0.65
+---------------------
+
+The following commands are specific to these layouts:
+
+*Syntax*:
+---------------------------------------------
+focusmaster
+swapwithmaster
+togglesplit
+pseudo
+cyclenext
+cycleprev
+layoutmsg togglesplit|pseudo|focusmaster|swapwithmaster|orientationleft|orientationright|orientationtop|orientationbottom|cyclenext
+---------------------------------------------
+
+focusmaster::
+Focuses the master window (the first window of the workspace).
+swapwithmaster::
+Swaps the focused window with the master window.
+togglesplit::
+Dwindle only: forces the focused window to be split in the other direction.
+pseudo::
+Dwindle only: the focused window keeps its current size and is centered in its
+tile instead of filling it.
+cyclenext/cycleprev::
+Focuses the next/previous window in the workspace (wrapping around). Unlike
++focus left/right+ these never leave the workspace, so they work in every
+layout, including +dwindle+ and +master+.
+layoutmsg::
+Hyprland-compatible alias for the commands above.
+
+[[animations]]
+=== Animations
+
+i3 can animate geometry changes, workspace switches and window opening/closing
+with the same bezier-based system Hyprland uses. Animations interpolate the
+rectangles that are pushed to X11, the layout tree itself is never modified, so
+all layout commands keep working exactly as before.
+
+*Syntax*:
+---------------------------------------------
+animations yes|no
+bezier <name>, <x1>, <y1>, <x2>, <y2>
+animation <type>, <enabled>, <duration in ms>, <curve>
+---------------------------------------------
+
++type+ is one of +windows+ (moving/resizing windows), +windowsIn+ (new windows),
++windowsOut+ (closing windows), +fadeIn+, +fadeOut+, +workspaces+ (workspace
+switching) or +global+ to configure all of them at once. +curve+ is either one of
+the built-in curves (+default+, +linear+, +easeOutCubic+, +easeOutQuint+,
++easeOutExpo+, +easeInOutCubic+, +easeInOutQuint+, +easeInOutSine+) or a curve
+defined with +bezier+.
+
+*Example*:
+--------------------------------------------------
+animations yes
+bezier myCurve, 0.2, 0.9, 0.3, 1.0
+animation windows, 1, 250, myCurve
+animation workspaces, 1, 400, myCurve
+animation windowsIn, 1, 200, myCurve
+animation fadeIn, 1
+--------------------------------------------------
+
+Opacity and dimming (requires a compositing manager such as picom to be
+visible):
+
+*Syntax*:
+---------------------------------------------
+active_opacity <0.0 - 1.0>
+inactive_opacity <0.0 - 1.0>
+dim_inactive yes|no
+dim_strength <0.0 - 1.0>
+---------------------------------------------
+
+*Example*:
+---------------------
+inactive_opacity 0.9
+dim_inactive yes
+dim_strength 0.15
 ---------------------
 
 === Window title alignment
@@ -2364,14 +2476,20 @@ bindsym $mod+t split toggle
 [[manipulating_layout]]
 === Manipulating layout
 
-Use +layout toggle split+, +layout stacking+, +layout tabbed+, +layout splitv+
-or +layout splith+ to change the current container layout to splith/splitv,
-stacking, tabbed layout, splitv or splith, respectively.
+Use +layout toggle split+, +layout stacking+, +layout tabbed+, +layout splitv+,
++layout splith+, +layout dwindle+ or +layout master+ to change the current
+container layout to splith/splitv, stacking, tabbed layout, splitv, splith,
+the <<dwindle_master,dwindle layout>> or the <<dwindle_master,master layout>>,
+respectively.
 
 Specify up to four layouts after +layout toggle+ to cycle through them. Every
 time the command is executed, the layout specified after the currently active
 one will be applied. If the currently active layout is not in the list, the
 first layout in the list will be activated.
+
+The <<dwindle_master,dwindle and master layouts>> provide the additional
+commands +focusmaster+, +swapwithmaster+, +togglesplit+, +pseudo+ and
++layoutmsg+. To center a floating window on its workspace, use +centerwindow+.
 
 To make the current window (!) fullscreen, use +fullscreen enable+ (or
 +fullscreen enable global+ for the global mode), to leave either fullscreen

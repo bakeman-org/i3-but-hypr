@@ -52,6 +52,33 @@ state INITIAL:
   'title_align'                            -> TITLE_ALIGN
   'show_marks'                             -> SHOW_MARKS
   'workspace'                              -> WORKSPACE
+  'animations'                             -> ANIMATIONS
+  'animation'                              -> ANIMATION
+  'bezier'                                 -> BEZIER
+  'master_ratio'                           -> MASTER_RATIO
+  'active_opacity'                         -> ACTIVE_OPACITY
+  'inactive_opacity'                       -> INACTIVE_OPACITY
+  'dim_inactive'                           -> DIM_INACTIVE
+  'dim_strength'                           -> DIM_STRENGTH
+  'rounding', 'border_radius'              -> ROUNDING
+  'border_size'                            -> BORDER_SIZE
+  'gaps_in'                                -> GAPS_IN
+  'gaps_out'                               -> GAPS_OUT
+  'titlebar_height'                        -> TITLEBAR_HEIGHT
+  'titlebar_padding'                       -> TITLEBAR_PADDING
+  'titlebar'                               -> TITLEBAR_VISIBILITY
+  'client.focused_gradient'                -> CLIENT_GRADIENT_FOCUSED
+  'client.focused_inactive_gradient'       -> CLIENT_GRADIENT_FOCUSED_INACTIVE
+  'client.unfocused_gradient'              -> CLIENT_GRADIENT_UNFOCUSED
+  'client.urgent_gradient'                 -> CLIENT_GRADIENT_URGENT
+  'dwindle_split_ratio'                    -> DWINDLE_SPLIT_RATIO
+  'scroller_proportion'                    -> SCROLLER_PROPORTION
+  'scroller_structs'                       -> SCROLLER_STRUCTS
+  'scroller_focus_center'                  -> SCROLLER_FOCUS_CENTER
+  'scroller_prefer_center'                 -> SCROLLER_PREFER_CENTER
+  'scroller_prefer_overspread'             -> SCROLLER_PREFER_OVERSPREAD
+  'scroller_ignore_proportion_single'      -> SCROLLER_IGNORE_PROPORTION_SINGLE
+  'scroller_default_proportion_single'     -> SCROLLER_DEFAULT_PROPORTION_SINGLE
   'ipc_socket', 'ipc-socket'               -> IPC_SOCKET
   'ipc_kill_timeout'                       -> IPC_KILL_TIMEOUT
   'restart_state'                          -> RESTART_STATE
@@ -154,9 +181,9 @@ state DEFAULT_ORIENTATION:
   orientation = 'horizontal', 'vertical', 'auto'
       -> call cfg_default_orientation($orientation)
 
-# workspace_layout <default|stacking|tabbed>
+# workspace_layout <default|stacking|tabbed|dwindle|master>
 state WORKSPACE_LAYOUT:
-  layout = 'default', 'stacking', 'stacked', 'tabbed'
+  layout = 'default', 'stacking', 'stacked', 'tabbed', 'dwindle', 'master'
       -> call cfg_workspace_layout($layout)
 
 # <default_border|new_window> <normal|1pixel|none>
@@ -766,3 +793,182 @@ state BAR_COLORS_TEXT:
       -> call cfg_bar_color($colorclass, $border, $background, NULL); BAR_COLORS
   text = word
       -> call cfg_bar_color($colorclass, $border, $background, $text); BAR_COLORS
+
+# animations <yes|no>
+state ANIMATIONS:
+  value = '1', 'yes', 'true', 'on', 'enable', 'active'
+      -> call cfg_animations($value)
+  value = '0', 'no', 'false', 'off', 'disable', 'inactive'
+      -> call cfg_animations($value)
+
+# animation <windows|workspaces>, <enabled>, <duration in ms>, <curve>
+state ANIMATION:
+  spec = string
+      -> call cfg_animation($spec)
+
+# bezier <name>, <x1>, <y1>, <x2>, <y2>
+state BEZIER:
+  spec = string
+      -> call cfg_bezier($spec)
+
+# master_ratio <0.1 - 0.9>
+state MASTER_RATIO:
+  value = string
+      -> call cfg_master_ratio($value)
+
+# active_opacity <0.0 - 1.0>
+state ACTIVE_OPACITY:
+  value = string
+      -> call cfg_active_opacity($value)
+
+# inactive_opacity <0.0 - 1.0>
+state INACTIVE_OPACITY:
+  value = string
+      -> call cfg_inactive_opacity($value)
+
+# dim_inactive <yes|no>
+state DIM_INACTIVE:
+  value = '1', 'yes', 'true', 'on', 'enable', 'active'
+      -> call cfg_dim_inactive($value)
+  value = '0', 'no', 'false', 'off', 'disable', 'inactive'
+      -> call cfg_dim_inactive($value)
+
+# dim_strength <0.0 - 1.0>
+state DIM_STRENGTH:
+  value = string
+      -> call cfg_dim_strength($value)
+
+# rounding <pixels>
+state ROUNDING:
+  value = string
+      -> call cfg_rounding($value)
+
+# border_size <pixels>
+state BORDER_SIZE:
+  value = string
+      -> call cfg_border_size($value)
+
+# gaps_in <pixels>
+state GAPS_IN:
+  value = string
+      -> call cfg_gaps_in($value)
+
+# gaps_out <pixels>
+state GAPS_OUT:
+  value = string
+      -> call cfg_gaps_out($value)
+
+# titlebar_height <pixels>
+state TITLEBAR_HEIGHT:
+  value = string
+      -> call cfg_titlebar_height($value)
+
+# titlebar_padding <pixels>
+state TITLEBAR_PADDING:
+  value = string
+      -> call cfg_titlebar_padding($value)
+
+# titlebar normal|none
+state TITLEBAR_VISIBILITY:
+  value = string
+      -> call cfg_titlebar_visibility($value)
+
+# dwindle_split_ratio <0.1 - 0.9>
+state DWINDLE_SPLIT_RATIO:
+  value = string
+      -> call cfg_dwindle_split_ratio($value)
+
+# scroller_proportion <0.1 - 1.0>
+state SCROLLER_PROPORTION:
+  value = string
+      -> call cfg_scroller_proportion($value)
+
+# scroller_structs <pixels>
+state SCROLLER_STRUCTS:
+  value = string
+      -> call cfg_scroller_structs($value)
+
+# scroller_focus_center yes|no
+state SCROLLER_FOCUS_CENTER:
+  value = string
+      -> call cfg_scroller_focus_center($value)
+
+# scroller_prefer_center yes|no
+state SCROLLER_PREFER_CENTER:
+  value = string
+      -> call cfg_scroller_prefer_center($value)
+
+# scroller_prefer_overspread yes|no
+state SCROLLER_PREFER_OVERSPREAD:
+  value = string
+      -> call cfg_scroller_prefer_overspread($value)
+
+# scroller_ignore_proportion_single yes|no
+state SCROLLER_IGNORE_PROPORTION_SINGLE:
+  value = string
+      -> call cfg_scroller_proportion_single($value)
+
+# scroller_default_proportion_single <0.1 - 1.0>
+state SCROLLER_DEFAULT_PROPORTION_SINGLE:
+  value = string
+      -> call cfg_scroller_default_proportion_single($value)
+
+# client.focused_gradient <start-color> <end-color> [angle]
+state CLIENT_GRADIENT_FOCUSED:
+  start = string
+      -> CLIENT_GRADIENT_FOCUSED_END
+
+state CLIENT_GRADIENT_FOCUSED_END:
+  end_color = string
+      -> CLIENT_GRADIENT_FOCUSED_DONE
+
+state CLIENT_GRADIENT_FOCUSED_DONE:
+  end
+      -> call cfg_client_gradient_focused($start, $end_color, 45)
+  angle = number
+      -> call cfg_client_gradient_focused($start, $end_color, &angle)
+
+# client.focused_inactive_gradient <start-color> <end-color> [angle]
+state CLIENT_GRADIENT_FOCUSED_INACTIVE:
+  start = string
+      -> CLIENT_GRADIENT_FOCUSED_INACTIVE_END
+
+state CLIENT_GRADIENT_FOCUSED_INACTIVE_END:
+  end_color = string
+      -> CLIENT_GRADIENT_FOCUSED_INACTIVE_DONE
+
+state CLIENT_GRADIENT_FOCUSED_INACTIVE_DONE:
+  end
+      -> call cfg_client_gradient_focused_inactive($start, $end_color, 45)
+  angle = number
+      -> call cfg_client_gradient_focused_inactive($start, $end_color, &angle)
+
+# client.unfocused_gradient <start-color> <end-color> [angle]
+state CLIENT_GRADIENT_UNFOCUSED:
+  start = string
+      -> CLIENT_GRADIENT_UNFOCUSED_END
+
+state CLIENT_GRADIENT_UNFOCUSED_END:
+  end_color = string
+      -> CLIENT_GRADIENT_UNFOCUSED_DONE
+
+state CLIENT_GRADIENT_UNFOCUSED_DONE:
+  end
+      -> call cfg_client_gradient_unfocused($start, $end_color, 45)
+  angle = number
+      -> call cfg_client_gradient_unfocused($start, $end_color, &angle)
+
+# client.urgent_gradient <start-color> <end-color> [angle]
+state CLIENT_GRADIENT_URGENT:
+  start = string
+      -> CLIENT_GRADIENT_URGENT_END
+
+state CLIENT_GRADIENT_URGENT_END:
+  end_color = string
+      -> CLIENT_GRADIENT_URGENT_DONE
+
+state CLIENT_GRADIENT_URGENT_DONE:
+  end
+      -> call cfg_client_gradient_urgent($start, $end_color, 45)
+  angle = number
+      -> call cfg_client_gradient_urgent($start, $end_color, &angle)

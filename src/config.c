@@ -208,6 +208,19 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
 
     config.show_marks = true;
 
+    /* Hyprland-style decorations are opt-in so that the upstream i3 look is
+     * preserved unless the user asks for rounded corners/gradients. */
+    config.rounding = 0;
+    config.titlebar_height = 0;
+    config.titlebar_padding = 2;
+    config.titlebar_hidden = false;
+    config.titlebar_icon_padding = 2;
+    memset(&config.client_gradients, 0, sizeof(config.client_gradients));
+    config.client_gradients.focused.angle = 45;
+    config.client_gradients.focused_inactive.angle = 45;
+    config.client_gradients.unfocused.angle = 45;
+    config.client_gradients.urgent.angle = 45;
+
     config.default_border = BS_NORMAL;
     config.default_floating_border = BS_NORMAL;
     config.default_border_width = logical_px(2);
@@ -227,6 +240,33 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     }
 
     config.focus_wrapping = FOCUS_WRAPPING_ON;
+
+    /* Hyprland-inspired animation defaults. */
+    config.animations = true;
+    config.animation_duration = 180;
+    config.animation_workspace_duration = 300;
+    config.animation_open_duration = 220;
+    config.animation_close_duration = 150;
+    strcpy(config.animation_curve, "easeOutQuint");
+    strcpy(config.animation_workspace_curve, "easeOutQuint");
+    strcpy(config.animation_open_curve, "easeOutQuint");
+    strcpy(config.animation_close_curve, "easeOutQuint");
+    config.animation_fade = true;
+    config.master_ratio = 0.6;
+    config.master_orientation = 0;
+    config.dwindle_split_ratio = 0.5;
+    config.scroller_proportion = 0.9;
+    config.scroller_structs = 20;
+    config.scroller_focus_center = false;
+    config.scroller_prefer_center = false;
+    config.scroller_prefer_overspread = true;
+    config.scroller_proportion_single = false;
+    config.scroller_default_proportion_single = 1.0;
+    config.active_opacity = 1.0;
+    config.inactive_opacity = 1.0;
+    config.dim_inactive = false;
+    config.dim_strength = 0.15;
+    animation_reset_beziers();
 
     config.tiling_drag = TILING_DRAG_MODIFIER;
     config.swap_modifier = XCB_KEY_BUT_MASK_SHIFT;

@@ -10,6 +10,7 @@
  */
 #include "all.h"
 
+#include <math.h>
 #include <unistd.h>
 
 #ifndef MAX
@@ -61,6 +62,10 @@ typedef struct con_state {
     Rect rect;
     Rect window_rect;
 
+    /* Radius of the rounded corners that was last applied to the frame and
+     * the client window. -1 means "not applied yet". */
+    int rounding;
+
     bool initial;
 
     char *name;
@@ -69,6 +74,9 @@ typedef struct con_state {
     CIRCLEQ_ENTRY(con_state) old_state;
     TAILQ_ENTRY(con_state) initial_mapping_order;
 } con_state;
+
+/* Forward declarations for the rounded corner handling. */
+static int decoration_radius(void);
 
 CIRCLEQ_HEAD(state_head, con_state) state_head =
     CIRCLEQ_HEAD_INITIALIZER(state_head);
@@ -180,6 +188,8 @@ void x_con_init(Con *con) {
                         "i3-frame\0i3-frame\0");
 
     con_state *state = scalloc(1, sizeof(struct con_state));
+    /* Force the rounded corner shape to be applied for the first frame. */
+    state->rounding = -1;
     state->id = con->frame.id;
     state->mapped = false;
     state->initial = true;
@@ -377,6 +387,27 @@ static void x_draw_title_border(Con *con, struct deco_render_params *p, surface_
                         dr->x, dr->y + dr->height - 1, dr->width, 1);
 }
 
+/*
+ * Returns the gradient configured for the given color class, or NULL if the
+ * border should be drawn with a solid color.
+ *
+ */
+static const struct gradient_spec *x_gradient_for_color(const struct Colortriple *color) {
+    struct gradient_spec *gradient = NULL;
+
+    if (color == &config.client.focused) {
+        gradient = &config.client_gradients.focused;
+    } else if (color == &config.client.focused_inactive) {
+        gradient = &config.client_gradients.focused_inactive;
+    } else if (color == &config.client.unfocused) {
+        gradient = &config.client_gradients.unfocused;
+    } else if (color == &config.client.urgent) {
+        gradient = &config.client_gradients.urgent;
+    }
+
+    return (gradient != NULL && gradient->enabled) ? gradient : NULL;
+}
+
 static void x_draw_decoration_after_title(Con *con, struct deco_render_params *p, surface_t *dest_surface) {
     assert(con->parent != NULL);
 
@@ -566,17 +597,36 @@ void x_draw_decoration(Con *con) {
 
     /* 3: draw a rectangle in border color around the client */
     if (p->border_style != BS_NONE && p->con_is_leaf) {
-        /* Fill the border. We don’t just fill the whole rectangle because some
-         * children are not freely resizable and we want their background color
-         * to "shine through". */
-        xcb_rectangle_t rectangles[4];
-        size_t rectangles_count = x_get_border_rectangles(con, rectangles);
-        for (size_t i = 0; i < rectangles_count; i++) {
-            draw_util_rectangle(&(con->frame_buffer), p->color->child_border,
-                                rectangles[i].x,
-                                rectangles[i].y,
-                                rectangles[i].width,
-                                rectangles[i].height);
+        const int radius = decoration_radius();
+        const struct gradient_spec *gradient = x_gradient_for_color(p->color);
+
+        if (radius > 0 || gradient != NULL) {
+            /* Rounded and/or gradient border: fill the whole frame with the
+             * border paint. The client window is placed on top of it and the
+             * title bar is painted afterwards, so only the border ring stays
+             * visible. */
+            if (gradient != NULL) {
+                draw_util_gradient_rounded_rectangle(
+                    &(con->frame_buffer), gradient->start, gradient->end,
+                    gradient->angle, 0, 0, r->width, r->height, radius);
+            } else {
+                draw_util_rounded_rectangle(&(con->frame_buffer),
+                                            p->color->child_border, 0, 0,
+                                            r->width, r->height, radius);
+            }
+        } else {
+            /* Fill the border. We don’t just fill the whole rectangle because some
+             * children are not freely resizable and we want their background color
+             * to "shine through". */
+            xcb_rectangle_t rectangles[4];
+            size_t rectangles_count = x_get_border_rectangles(con, rectangles);
+            for (size_t i = 0; i < rectangles_count; i++) {
+                draw_util_rectangle(&(con->frame_buffer), p->color->child_border,
+                                    rectangles[i].x,
+                                    rectangles[i].y,
+                                    rectangles[i].width,
+                                    rectangles[i].height);
+            }
         }
 
         /* Highlight the side of the border at which the next window will be
@@ -640,7 +690,7 @@ void x_draw_decoration(Con *con) {
     struct Window *win = con->window;
 
     const int deco_width = (int)con->deco_rect.width;
-    const int title_padding = logical_px(2);
+    const int title_padding = logical_px(MAX(1, config.titlebar_padding));
 
     int mark_width = 0;
     if (config.show_marks && !TAILQ_EMPTY(&(con->marks_head))) {
@@ -703,7 +753,7 @@ void x_draw_decoration(Con *con) {
     /* icon_padding is applied horizontally only, the icon will always use all
      * available vertical space. */
     int icon_size = max(0, con->deco_rect.height - logical_px(2));
-    int icon_padding = logical_px(max(1, con->window_icon_padding));
+    int icon_padding = logical_px(max(1, config.titlebar_icon_padding));
     int total_icon_space = icon_size + 2 * icon_padding;
     const bool has_icon = (con->window_icon_padding > -1) && win && win->icon && (total_icon_space < deco_width);
     if (!has_icon) {
@@ -866,6 +916,95 @@ static void set_maximized_state(Con *con) {
 }
 
 /*
+ * Returns the configured corner radius in pixels, 0 when rounded corners are
+ * disabled.
+ *
+ */
+static int decoration_radius(void) {
+    return config.rounding > 0 ? config.rounding : 0;
+}
+
+/*
+ * Sets a rounded rectangular shape on the given window. As the SHAPE
+ * extension only knows 1-bit masks, the corners are approximated with one
+ * rectangle per pixel row, which is good enough for the small radii used for
+ * window decorations.
+ *
+ */
+static void x_set_rounded_shape(xcb_window_t window, int width, int height, int radius) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    if (radius <= 0) {
+        /* Reset the shape to the full rectangle. */
+        xcb_rectangle_t rect = {.x = 0, .y = 0, .width = width, .height = height};
+        xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
+                             XCB_CLIP_ORDERING_UNSORTED, window, 0, 0, 1, &rect);
+        return;
+    }
+
+    if (radius > MIN(width, height) / 2) {
+        radius = MIN(width, height) / 2;
+    }
+
+    const int rows = radius;
+    /* Top and bottom part plus one rectangle spanning the middle. */
+    xcb_rectangle_t *rects = smalloc(sizeof(xcb_rectangle_t) * (2 * rows + 1));
+    int count = 0;
+
+    for (int y = 0; y < rows; y++) {
+        const double dy = radius - y - 0.5;
+        const double span = sqrt(MAX(0.0, (double)radius * radius - dy * dy));
+        const int inset = radius - (int)lround(span);
+
+        /* one row at the top … */
+        rects[count++] = (xcb_rectangle_t){
+            .x = inset, .y = y, .width = width - 2 * inset, .height = 1};
+        /* … and the mirrored row at the bottom. */
+        rects[count++] = (xcb_rectangle_t){
+            .x = inset, .y = height - 1 - y, .width = width - 2 * inset, .height = 1};
+    }
+
+    rects[count++] = (xcb_rectangle_t){
+        .x = 0, .y = radius, .width = width, .height = height - 2 * radius};
+
+    xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
+                         XCB_CLIP_ORDERING_UNSORTED, window, 0, 0, count, rects);
+    free(rects);
+}
+
+/*
+ * Applies (or removes) the rounded corner shape of the frame and the client
+ * window of the given container.
+ *
+ */
+static void x_apply_rounding(Con *con, con_state *state) {
+    const int radius = decoration_radius();
+    if (state != NULL && state->rounding == radius) {
+        return;
+    }
+
+    if (state != NULL) {
+        state->rounding = radius;
+    }
+
+    if (!shape_supported) {
+        return;
+    }
+
+    x_set_rounded_shape(con->frame.id, con->rect.width, con->rect.height, radius);
+
+    /* Never touch windows which bring their own shape (e.g. xeyes). */
+    if (con->window != NULL && !con->window->shaped) {
+        const Rect bsr = con_border_style_rect(con);
+        const int inner_radius = MAX(0, radius - bsr.x);
+        x_set_rounded_shape(con->window->id, con->window_rect.width,
+                            con->window_rect.height, inner_radius);
+    }
+}
+
+/*
  * Set the container frame shape as the union of the window shape and the
  * shape of the frame borders.
  */
@@ -938,9 +1077,43 @@ static void set_shape_state(Con *con, bool need_reshape) {
  */
 void x_push_node(Con *con) {
     Con *current;
-    Rect rect = con->rect;
-
     con_state *state = state_for_frame(con->frame.id);
+
+    /* Start animations for this container. The animation interpolates between
+     * the rectangle that is currently visible in X11 (state->rect) and the
+     * rectangle the layout engine computed (con->rect). */
+    if (con->window != NULL && con->mapped && con->fullscreen_mode == CF_NONE) {
+        const anim_rect layout_rect = animation_rect_from_layout(con->rect);
+
+        if (con->anim.slide_pending) {
+            anim_rect from = layout_rect;
+            from.x += con->anim.slide_dx;
+            con->anim.slide_pending = false;
+            animation_begin(con, from, layout_rect, config.animation_workspace_curve,
+                            config.animation_workspace_duration / 1000.0, false);
+        } else if ((state->initial || !con->anim.ever_pushed) && con->mapped) {
+            /* newly mapped window: slide up a little while fading in */
+            anim_rect from = layout_rect;
+            from.y += logical_px(24);
+            con->anim.ever_pushed = true;
+            animation_begin(con, from, layout_rect, config.animation_open_curve,
+                            config.animation_open_duration / 1000.0,
+                            config.animation_fade);
+        } else if (!con->anim.active && state->mapped &&
+                   !rect_equals(state->rect, con->rect)) {
+            animation_begin(con, animation_rect_from_layout(state->rect), layout_rect,
+                            config.animation_curve,
+                            config.animation_duration / 1000.0, false);
+        }
+    }
+
+    Rect rect = con->rect;
+    if (con->anim.active) {
+        rect.x = (uint32_t)con->anim.cur.x;
+        rect.y = (uint32_t)con->anim.cur.y;
+        rect.width = (uint32_t)con->anim.cur.width;
+        rect.height = (uint32_t)con->anim.cur.height;
+    }
 
     if (state->name != NULL) {
         DLOG("pushing name %s for con %p\n", state->name, con);
@@ -1111,16 +1284,31 @@ void x_push_node(Con *con) {
     }
 
     /* ditto, but for child windows */
-    if (con->window != NULL &&
-        !rect_equals(state->window_rect, con->window_rect)) {
-        DLOG("setting window rect (%d, %d, %d, %d)\n",
-             con->window_rect.x, con->window_rect.y, con->window_rect.width, con->window_rect.height);
-        xcb_set_window_rect(conn, con->window->id, con->window_rect);
-        memcpy(&(state->window_rect), &(con->window_rect), sizeof(Rect));
-        fake_notify = true;
+    if (con->window != NULL) {
+        Rect window_rect = con->window_rect;
+        if (con->anim.active) {
+            /* The client window is positioned relative to its frame, so only
+             * size changes need to be propagated. */
+            const int32_t dw = con->anim.cur.width - (int32_t)con->rect.width;
+            const int32_t dh = con->anim.cur.height - (int32_t)con->rect.height;
+            window_rect.width = (uint32_t)((int32_t)con->window_rect.width + dw);
+            window_rect.height = (uint32_t)((int32_t)con->window_rect.height + dh);
+        }
+        if (!rect_equals(state->window_rect, window_rect)) {
+            DLOG("setting window rect (%d, %d, %d, %d)\n",
+                 window_rect.x, window_rect.y, window_rect.width, window_rect.height);
+            xcb_set_window_rect(conn, con->window->id, window_rect);
+            memcpy(&(state->window_rect), &window_rect, sizeof(Rect));
+            fake_notify = true;
+        }
     }
 
     set_shape_state(con, need_reshape);
+
+    /* Rounded corners, Hyprland-style. This has to happen after
+     * set_shape_state() so that our shape wins over the one derived from a
+     * shaped client window. */
+    x_apply_rounding(con, state);
 
     /* Set _NET_FRAME_EXTENTS according to the actual decoration size. */
     if (con != NULL && con->window != NULL) {

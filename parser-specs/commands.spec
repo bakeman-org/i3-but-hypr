@@ -14,6 +14,16 @@ state INITIAL:
   # function without using an explicit 'end' token.
   end ->
   '[' -> call cmd_criteria_init(); CRITERIA
+  'focusmaster' -> call cmd_focusmaster()
+  'swapwithmaster' -> call cmd_swap_with_master()
+  'togglesplit' -> call cmd_toggle_split()
+  'pseudo' -> call cmd_pseudo()
+  'centerwindow' -> call cmd_center_window()
+  'cyclenext' -> call cmd_cycle_next()
+  'cycleprev' -> call cmd_cycle_prev()
+  'layoutmsg' -> LAYOUTMSG
+  'zoom' -> call cmd_zoom()
+  'swapdir' -> SWAPDIR
   'move' -> MOVE
   'exec' -> EXEC
   'exit' -> call cmd_exit()
@@ -146,7 +156,7 @@ state GAPS_END:
 # layout default|stacked|stacking|tabbed|splitv|splith
 # layout toggle [split|all]
 state LAYOUT:
-  layout_mode = 'default', 'stacked', 'stacking', 'tabbed', 'splitv', 'splith'
+  layout_mode = 'default', 'stacked', 'stacking', 'tabbed', 'splitv', 'splith', 'dwindle', 'master', 'scroller'
       -> call cmd_layout($layout_mode)
   'toggle'
       -> LAYOUT_TOGGLE
@@ -552,3 +562,13 @@ state BAR_MODE_ID:
       ->
   end
       -> call cmd_bar_mode($bar_value, $bar_id)
+
+# layoutmsg <message>
+state LAYOUTMSG:
+  message = string
+      -> call cmd_layoutmsg($message)
+
+# swapdir left|right|up|down
+state SWAPDIR:
+  direction = 'left', 'right', 'up', 'down'
+      -> call cmd_swapdir($direction)

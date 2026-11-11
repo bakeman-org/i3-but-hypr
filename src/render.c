@@ -20,16 +20,16 @@ static void render_con_split(Con *con, Con *child, render_params *p, int i);
 static void render_con_stacked(Con *con, Con *child, render_params *p, int i);
 static void render_con_tabbed(Con *con, Con *child, render_params *p, int i);
 static void render_con_dockarea(Con *con, Con *child, render_params *p);
+static void render_con_dwindle(Con *con, Con *child, render_params *p, int i);
+static void render_con_master(Con *con, Con *child, render_params *p, int i);
+static void render_leaf_deco(Con *child, int deco_height);
+static void render_con_scroller(Con *con, Con *child, render_params *p, int i);
 
 /*
  * Returns the height for the decorations
  */
 int render_deco_height(void) {
-    int deco_height = config.font.height + 4;
-    if (config.font.height & 0x01) {
-        ++deco_height;
-    }
-    return deco_height;
+    return con_titlebar_height(NULL);
 }
 
 /*
@@ -171,6 +171,12 @@ void render_con(Con *con) {
                 render_con_tabbed(con, child, &params, i);
             } else if (con->layout == L_DOCKAREA) {
                 render_con_dockarea(con, child, &params);
+            } else if (con->layout == L_DWINDLE) {
+                render_con_dwindle(con, child, &params, i);
+            } else if (con->layout == L_MASTER) {
+                render_con_master(con, child, &params, i);
+            } else if (con->layout == L_SCROLLER) {
+                render_con_scroller(con, child, &params, i);
             }
 
             child->rect = rect_sanitize_dimensions(child->rect);
@@ -183,7 +189,9 @@ void render_con(Con *con) {
             /* render_con_split() sets the deco_rect width based on the rect
              * width, but the render_con() call updates the rect width by
              * applying gaps, so we need to update deco_rect. */
-            if (con->layout == L_SPLITH || con->layout == L_SPLITV) {
+            if (con->layout == L_SPLITH || con->layout == L_SPLITV ||
+                con->layout == L_DWINDLE || con->layout == L_MASTER ||
+                con->layout == L_SCROLLER) {
                 if (con_is_leaf(child)) {
                     if (child->border_style == BS_NORMAL) {
                         child->deco_rect.width = child->rect.width;
@@ -424,7 +432,7 @@ static void render_con_split(Con *con, Con *child, render_params *p, int i) {
             child->deco_rect.y = 0;
 
             child->deco_rect.width = child->rect.width;
-            child->deco_rect.height = p->deco_height;
+            child->deco_rect.height = con_titlebar_height(child);
         } else {
             child->deco_rect.x = 0;
             child->deco_rect.y = 0;
@@ -493,4 +501,305 @@ static void render_con_dockarea(Con *con, Con *child, render_params *p) {
     child->deco_rect.width = 0;
     child->deco_rect.height = 0;
     p->y += child->rect.height;
+}
+
+/*
+ * Sets the decoration rectangle for a leaf container whose rect has just been
+ * computed (used by the dwindle/master layouts, where children are not
+ * rendered by render_con_split()).
+ *
+ */
+static void render_leaf_deco(Con *child, int deco_height) {
+    deco_height = con_titlebar_height(child);
+
+    if (!con_is_leaf(child) || child->border_style != BS_NORMAL) {
+        child->deco_rect.x = 0;
+        child->deco_rect.y = 0;
+        child->deco_rect.width = 0;
+        child->deco_rect.height = 0;
+        return;
+    }
+
+    child->deco_rect.x = 0;
+    child->deco_rect.y = 0;
+    child->deco_rect.width = child->rect.width;
+    child->deco_rect.height = deco_height;
+}
+
+/*
+ * Scroller layout (ported from mangowc): every container is a column whose
+ * width is a fraction of the available monitor width. The focused column is
+ * kept visible by centering it (or by anchoring it to the left/right edge),
+ * the other columns are positioned relative to it. Columns may be wider than
+ * the monitor, in which case they simply scroll out of the visible area.
+ *
+ */
+static void render_con_scroller(Con *con, Con *child, render_params *p, int i) {
+    assert(con->layout == L_SCROLLER);
+
+    int count = 0;
+    int focus_index = -1;
+    Con *cur;
+    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+        if (cur == focused || con_inside_focused(cur)) {
+            focus_index = count;
+        }
+        count++;
+    }
+
+    if (count == 0) {
+        child->rect = p->rect;
+        render_leaf_deco(child, p->deco_height);
+        return;
+    }
+
+    if (focus_index < 0) {
+        focus_index = 0;
+    }
+
+    /* Space which is kept free at both sides of the scroller area. */
+    int structs = config.scroller_structs;
+    if (structs < 0) {
+        structs = 0;
+    }
+
+    int max_width = (int)p->rect.width - 2 * structs;
+    if (max_width < 1) {
+        max_width = (int)p->rect.width;
+        structs = 0;
+    }
+
+    /* Collect the width of every column. */
+    int *widths = smalloc(sizeof(int) * (size_t)count);
+    int *positions = smalloc(sizeof(int) * (size_t)count);
+
+    int idx = 0;
+    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+        double proportion = cur->scroller_proportion;
+        if (proportion <= 0.01) {
+            proportion = config.scroller_proportion;
+        }
+        if (count == 1 && config.scroller_proportion_single) {
+            proportion = config.scroller_default_proportion_single;
+        }
+
+        int width = (int)lround((double)max_width * proportion);
+        if (width < 1) {
+            width = 1;
+        }
+        if ((uint32_t)width > p->rect.width) {
+            width = (int)p->rect.width;
+        }
+        widths[idx++] = width;
+    }
+
+    const bool single = (count == 1);
+    const bool overspread = (config.scroller_prefer_overspread && count > 1 &&
+                             (focus_index == 0 || focus_index == count - 1));
+
+    int focus_x;
+    if (single && !config.scroller_proportion_single) {
+        /* A single window fills the whole area, like in every other i3
+         * layout. */
+        widths[0] = (int)p->rect.width;
+        focus_x = (int)p->rect.x;
+    } else if (overspread) {
+        /* The outermost column takes the whole width instead of its
+         * proportion. */
+        widths[focus_index] = (int)p->rect.width;
+        focus_x = (int)p->rect.x;
+    } else if (single || config.scroller_focus_center) {
+        focus_x = (int)p->rect.x + ((int)p->rect.width - widths[focus_index]) / 2;
+    } else if (focus_index * 2 < count) {
+        /* Focus is on the left half: anchor it to the left and let the
+         * following columns run off the right edge. */
+        focus_x = (int)p->rect.x + structs;
+    } else {
+        focus_x = (int)p->rect.x + (int)p->rect.width - structs - widths[focus_index];
+    }
+
+    positions[focus_index] = focus_x;
+    for (int j = focus_index + 1; j < count; j++) {
+        positions[j] = positions[j - 1] + widths[j - 1];
+    }
+    for (int j = focus_index - 1; j >= 0; j--) {
+        positions[j] = positions[j + 1] - widths[j];
+    }
+
+    child->rect = (Rect){
+        (uint32_t)MAX(0, positions[i]),
+        p->rect.y,
+        (uint32_t)widths[i],
+        p->rect.height,
+    };
+
+    free(widths);
+    free(positions);
+
+    render_leaf_deco(child, p->deco_height);
+}
+
+/*
+ * Dwindle layout (Hyprland's default): every container except the last one
+ * takes half of the remaining space, alternating between a horizontal and a
+ * vertical split. This produces the characteristic staircase shape.
+ *
+ */
+static void render_con_dwindle(Con *con, Con *child, render_params *p, int i) {
+    assert(con->layout == L_DWINDLE);
+
+    Rect remaining = p->rect;
+    orientation_t next_orientation = HORIZ;
+    int idx = 0;
+    Con *cur;
+
+    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+        const bool last = (TAILQ_NEXT(cur, nodes) == NULL);
+
+        /* `togglesplit` stores an explicit split direction per container, -1
+         * means "keep alternating". */
+        orientation_t orientation = next_orientation;
+        if (cur->split_direction == 0) {
+            orientation = HORIZ;
+        } else if (cur->split_direction == 1) {
+            orientation = VERT;
+        }
+
+        Rect rect = remaining;
+
+        if (!last) {
+            /* dwindle_split_ratio controls how much of the remaining space
+             * the first part of a split takes (mangowc's
+             * dwindle_split_ratio). */
+            double ratio = config.dwindle_split_ratio;
+            if (ratio < 0.1 || ratio > 0.9) {
+                ratio = 0.5;
+            }
+
+            if (orientation == HORIZ) {
+                rect.width = (uint32_t)MAX(1, (int)lround((double)remaining.width * ratio));
+            } else {
+                rect.height = (uint32_t)MAX(1, (int)lround((double)remaining.height * ratio));
+            }
+        }
+
+        if (idx == i) {
+            child->rect = rect;
+
+            /* Pseudotiled containers keep their own size and are centered
+             * inside the tile they were assigned. */
+            if (child->pseudo &&
+                child->pseudo_width > 0 && child->pseudo_height > 0 &&
+                (child->pseudo_width < rect.width || child->pseudo_height < rect.height)) {
+                const int width = child->pseudo_width < rect.width ? child->pseudo_width : rect.width;
+                const int height = child->pseudo_height < rect.height ? child->pseudo_height : rect.height;
+                child->rect = (Rect){
+                    rect.x + (rect.width - width) / 2,
+                    rect.y + (rect.height - height) / 2,
+                    width,
+                    height,
+                };
+            }
+
+            render_leaf_deco(child, p->deco_height);
+            return;
+        }
+
+        if (last) {
+            break;
+        }
+
+        if (orientation == HORIZ) {
+            remaining.x += rect.width;
+            remaining.width -= rect.width;
+        } else {
+            remaining.y += rect.height;
+            remaining.height -= rect.height;
+        }
+
+        next_orientation = (orientation == HORIZ) ? VERT : HORIZ;
+        idx++;
+    }
+
+    /* Not reached: the caller only renders existing children. */
+    child->rect = p->rect;
+    render_leaf_deco(child, p->deco_height);
+}
+
+/*
+ * Master layout (Hyprland's "master"): the first container occupies the master
+ * area on the left (config.master_ratio of the width), all other containers are
+ * stacked vertically on the right.
+ *
+ */
+static void render_con_master(Con *con, Con *child, render_params *p, int i) {
+    assert(con->layout == L_MASTER);
+
+    if (p->children <= 1) {
+        child->rect = p->rect;
+        render_leaf_deco(child, p->deco_height);
+        return;
+    }
+
+    /* 0 = master on the left, 1 = right, 2 = top, 3 = bottom */
+    const int orientation = config.master_orientation;
+    const bool vertical = (orientation == 2 || orientation == 3);
+    const int total = vertical ? p->rect.height : p->rect.width;
+
+    int master = lround((double)total * config.master_ratio);
+    if (master < 1) {
+        master = 1;
+    }
+    if (master >= total) {
+        master = total - 1;
+    }
+
+    Rect master_rect;
+    Rect stack_rect;
+
+    switch (orientation) {
+        case 1: /* master on the right */
+            master_rect = (Rect){p->rect.x + p->rect.width - master, p->rect.y,
+                                 master, p->rect.height};
+            stack_rect = (Rect){p->rect.x, p->rect.y,
+                                p->rect.width - master, p->rect.height};
+            break;
+        case 2: /* master on top */
+            master_rect = (Rect){p->rect.x, p->rect.y, p->rect.width, master};
+            stack_rect = (Rect){p->rect.x, p->rect.y + master,
+                                p->rect.width, p->rect.height - master};
+            break;
+        case 3: /* master at the bottom */
+            master_rect = (Rect){p->rect.x, p->rect.y + p->rect.height - master,
+                                 p->rect.width, master};
+            stack_rect = (Rect){p->rect.x, p->rect.y,
+                                p->rect.width, p->rect.height - master};
+            break;
+        default: /* master on the left */
+            master_rect = (Rect){p->rect.x, p->rect.y, master, p->rect.height};
+            stack_rect = (Rect){p->rect.x + master, p->rect.y,
+                                p->rect.width - master, p->rect.height};
+            break;
+    }
+
+    if (i == 0) {
+        child->rect = master_rect;
+        render_leaf_deco(child, p->deco_height);
+        return;
+    }
+
+    const int stack = p->children - 1;
+    const int idx = i - 1;
+
+    if (vertical) {
+        const int x = stack_rect.x + (idx * stack_rect.width) / stack;
+        const int right = stack_rect.x + ((idx + 1) * stack_rect.width) / stack;
+        child->rect = (Rect){x, stack_rect.y, right - x, stack_rect.height};
+    } else {
+        const int y = stack_rect.y + (idx * stack_rect.height) / stack;
+        const int bottom = stack_rect.y + ((idx + 1) * stack_rect.height) / stack;
+        child->rect = (Rect){stack_rect.x, y, stack_rect.width, bottom - y};
+    }
+
+    render_leaf_deco(child, p->deco_height);
 }

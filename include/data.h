@@ -105,7 +105,19 @@ typedef enum {
     L_DOCKAREA = 3,
     L_OUTPUT = 4,
     L_SPLITV = 5,
-    L_SPLITH = 6
+    L_SPLITH = 6,
+    /* dwindle: every new container splits the remaining space in half,
+     * alternating between horizontal and vertical splits (Hyprland's default
+     * layout). */
+    L_DWINDLE = 7,
+    /* master: the first container occupies the master area on the left, all
+     * other containers are stacked vertically on the right (Hyprland's
+     * "master" layout). */
+    L_MASTER = 8,
+    /* scroller (ported from mangowc): the containers are laid out as columns
+     * that scroll horizontally, the focused column is centered/anchored and
+     * every column width is a fraction of the monitor width. */
+    L_SCROLLER = 9
 } layout_t;
 
 /**
@@ -653,6 +665,47 @@ struct mark_t {
 };
 
 /**
+ * Per-container animation state used for smooth geometry transitions
+ * (Hyprland-style animations). The animation never modifies the layout tree:
+ * it only interpolates between the last rectangle that was pushed to X11 and
+ * the rectangle the layout engine computed, so all layout code can stay purely
+ * geometry based.
+ *
+ */
+/**
+ * A signed rectangle, used for animations only: sliding workspaces in requires
+ * coordinates outside of the visible area (negative or larger than the screen),
+ * which the unsigned Rect type cannot express.
+ *
+ */
+typedef struct anim_rect {
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+} anim_rect;
+
+typedef struct con_anim {
+    bool active;
+    anim_rect from;
+    anim_rect to;
+    anim_rect cur;
+    /* timestamp (ev_now) and duration in seconds */
+    double start;
+    double duration;
+    int curve;
+    /* opacity fade (only has a visible effect when a compositor runs) */
+    bool fade;
+    double opacity_from;
+    double opacity_to;
+    /* pending slide-in, set when the container's workspace is switched to */
+    bool slide_pending;
+    int slide_dx;
+    /* whether this container's frame was ever pushed to X11 while mapped */
+    bool ever_pushed;
+} con_anim;
+
+/**
  * A 'Con' represents everything from the X11 root window down to a single X11 window.
  *
  */
@@ -821,4 +874,21 @@ struct Con {
 
     /* The colormap for this con if a custom one is used. */
     xcb_colormap_t colormap;
+
+    /* Animation state, see src/animation.c. */
+    con_anim anim;
+
+    /* Per-container dwindle layout state (Hyprland semantics):
+     * split_direction is -1 for "alternate automatically", 0 to force a
+     * horizontal split for the next container and 1 to force a vertical one. */
+    int8_t split_direction;
+    /* Width of the container as a fraction of the monitor width in the
+     * scroller layout. 0 means "use config.scroller_proportion". */
+    float scroller_proportion;
+
+    /* Pseudotiling: the container keeps its own size instead of filling its
+     * tile, it is centered inside the tile instead. */
+    bool pseudo;
+    int pseudo_width;
+    int pseudo_height;
 };

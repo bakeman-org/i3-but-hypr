@@ -594,6 +594,8 @@ int main(int argc, char *argv[]) {
         die("Could not initialize libev. Bad LIBEV_FLAGS?\n");
     }
 
+    animation_init();
+
     root_screen = xcb_aux_get_screen(conn, conn_screen);
     root = root_screen->root;
 

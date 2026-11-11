@@ -44,6 +44,8 @@ Con *con_new_skeleton(Con *parent, i3Window *window) {
     new->border_style = new->max_user_border_style = config.default_border;
     new->current_border_width = -1;
     new->window_icon_padding = -1;
+    /* -1 means: let the dwindle layout alternate the split direction. */
+    new->split_direction = -1;
     if (window) {
         new->depth = window->depth;
     } else {
@@ -251,6 +253,8 @@ void con_focus(Con *con) {
     assert(con != NULL);
     DLOG("con_focus = %p\n", con);
 
+    Con *previously_focused = focused;
+
     /* 1: set focused-pointer to the new con */
     /* 2: exchange the position of the container in focus stack of the parent all the way up */
     TAILQ_REMOVE(&(con->parent->focus_head), con, focused);
@@ -270,6 +274,10 @@ void con_focus(Con *con) {
         con_update_parents_urgency(con);
         workspace_update_urgent_flag(con_get_workspace(con));
         ipc_send_window_event("urgent", con);
+    }
+
+    if (previously_focused != con) {
+        animation_focus_changed(previously_focused, con);
     }
 }
 
@@ -1627,6 +1635,11 @@ orientation_t con_orientation(Con *con) {
         case L_SPLITH:
         /* tabbed containers behave like they are in vertical orientation */
         case L_TABBED:
+        /* dwindle and master layouts mix both orientations; report horizontal
+         * and let the geometry-based focus code (see tree.c) handle the rest */
+        case L_DWINDLE:
+        case L_MASTER:
+        case L_SCROLLER:
             return HORIZ;
 
         case L_DEFAULT:
@@ -1883,7 +1896,7 @@ Rect con_border_style_rect(Con *con) {
     Rect result = con_border_style_rect_without_title(con);
     if (con_border_style(con) == BS_NORMAL &&
         con_draw_decoration_into_frame(con)) {
-        const int deco_height = render_deco_height();
+        const int deco_height = con_titlebar_height(con);
         result.y += deco_height;
         result.height -= deco_height;
     }
@@ -1916,6 +1929,34 @@ adjacent_t con_adjacent_borders(Con *con) {
         result |= ADJ_LOWER_SCREEN_EDGE;
     }
     return result;
+}
+
+/*
+ * Returns the height of the title bar of the given container, honouring the
+ * titlebar_height / titlebar none options. Stacked and tabbed containers keep
+ * their title bars because they double as the tab labels.
+ *
+ */
+int con_titlebar_height(Con *con) {
+    if (con != NULL && config.titlebar_hidden) {
+        const bool in_tabs = (con->parent != NULL &&
+                              (con->parent->layout == L_STACKED ||
+                               con->parent->layout == L_TABBED));
+        if (!in_tabs) {
+            return 0;
+        }
+    }
+
+    if (config.titlebar_height > 0) {
+        return config.titlebar_height;
+    }
+
+    int deco_height = config.font.height + 4;
+    if (config.font.height & 0x01) {
+        ++deco_height;
+    }
+
+    return deco_height;
 }
 
 /*
@@ -2018,12 +2059,18 @@ void con_set_layout(Con *con, layout_t layout) {
      * need to create a new split container. */
     if (con->type == CT_WORKSPACE) {
         if (con_num_children(con) == 0) {
-            layout_t ws_layout = (layout == L_STACKED || layout == L_TABBED) ? layout : L_DEFAULT;
+            layout_t ws_layout = (layout == L_STACKED || layout == L_TABBED ||
+                                  layout == L_DWINDLE || layout == L_MASTER ||
+                                  layout == L_SCROLLER)
+                                     ? layout
+                                     : L_DEFAULT;
             DLOG("Setting workspace_layout to %d\n", ws_layout);
             con->workspace_layout = ws_layout;
             DLOG("Setting layout to %d\n", layout);
             con->layout = layout;
-        } else if (layout == L_STACKED || layout == L_TABBED || layout == L_SPLITV || layout == L_SPLITH) {
+        } else if (layout == L_STACKED || layout == L_TABBED || layout == L_SPLITV ||
+                   layout == L_SPLITH || layout == L_DWINDLE || layout == L_MASTER ||
+                   layout == L_SCROLLER) {
             DLOG("Creating new split container\n");
             /* 1: create a new split container */
             Con *new = con_new(NULL, NULL);
@@ -2191,6 +2238,17 @@ void con_toggle_layout(Con *con, const char *toggle_mode) {
                 }
             } else {
                 con_set_layout(con, L_STACKED);
+            }
+        } else if (strcasecmp(toggle_mode, "all") == 0) {
+            /* Continue the cycle with the dwindle/master layouts. */
+            if (parent->layout == L_SPLITV) {
+                con_set_layout(con, L_DWINDLE);
+            } else if (parent->layout == L_DWINDLE) {
+                con_set_layout(con, L_MASTER);
+            } else if (parent->layout == L_MASTER) {
+                con_set_layout(con, L_SCROLLER);
+            } else if (parent->layout == L_SCROLLER) {
+                con_set_layout(con, L_SPLITH);
             }
         }
     }
@@ -2751,4 +2809,27 @@ bool con_inside_stacked_or_tabbed(Con *con) {
         return true;
     }
     return con_inside_stacked_or_tabbed(con->parent);
+}
+
+/*
+ * Sets the layout of the given container directly, without hopping to the
+ * parent container or creating wrapper containers. This is used for the
+ * workspace-wide dwindle/master layouts.
+ *
+ */
+void con_set_layout_direct(Con *con, layout_t layout) {
+    if (con == NULL) {
+        return;
+    }
+
+    if (con->layout == L_SPLITH || con->layout == L_SPLITV) {
+        con->last_split_layout = con->layout;
+    }
+
+    if (con->type == CT_WORKSPACE && con_num_children(con) == 0) {
+        con->workspace_layout = layout;
+    }
+
+    con->layout = layout;
+    con_force_split_parents_redraw(con);
 }

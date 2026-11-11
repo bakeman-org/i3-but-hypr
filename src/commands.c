@@ -1615,6 +1615,26 @@ void cmd_layout(I3_CMD, const char *layout_str) {
         }
 
         DLOG("matching: %p / %s\n", current->con, current->con->name);
+        if (layout == L_DWINDLE || layout == L_MASTER || layout == L_SCROLLER) {
+            /* dwindle and master are workspace-wide layouts: apply them to the
+             * container that holds all windows of the workspace instead of
+             * nesting a new container around the focused window. */
+            Con *ws = con_get_workspace(current->con);
+            if (ws == NULL) {
+                continue;
+            }
+            Con *target = ws;
+            if (con_num_children(ws) == 1) {
+                target = TAILQ_FIRST(&(ws->nodes_head));
+            } else if (con_num_children(ws) > 1) {
+                target = workspace_encapsulate(ws);
+                if (target == NULL) {
+                    target = ws;
+                }
+            }
+            con_set_layout_direct(target, layout);
+            continue;
+        }
         con_set_layout(current->con, layout);
     }
 
@@ -2534,4 +2554,590 @@ void cmd_gaps(I3_CMD, const char *type, const char *scope, const char *mode, con
 
 error:
     ysuccess(false);
+}
+
+/*
+ * Returns the container that holds all tiling windows of the workspace of the
+ * given container. For the dwindle and master layouts this is the single child
+ * container of the workspace, in all other cases the workspace itself.
+ *
+ */
+static Con *layout_container_for(Con *con) {
+    Con *ws = con_get_workspace(con);
+    if (ws == NULL) {
+        return NULL;
+    }
+
+    if (con_num_children(ws) == 1) {
+        Con *child = TAILQ_FIRST(&(ws->nodes_head));
+        if (child->type == CT_CON) {
+            return child;
+        }
+    }
+
+    return ws;
+}
+
+/*
+ * Climbs up the tree until the container is a direct child of the given
+ * container (or a child of the workspace).
+ *
+ */
+static Con *climb_to_container(Con *con, Con *container) {
+    while (con->parent != NULL && con->parent != container &&
+           con->parent->type != CT_WORKSPACE) {
+        con = con->parent;
+    }
+    return con;
+}
+
+/*
+ * Focuses the first (master) container of the focused workspace.
+ *
+ */
+static bool focus_master(Con *target) {
+    Con *container = layout_container_for(target);
+    if (container == NULL) {
+        return false;
+    }
+
+    Con *master = TAILQ_FIRST(&(container->nodes_head));
+    if (master == NULL) {
+        return false;
+    }
+
+    con_focus(con_descend_focused(master));
+    return true;
+}
+
+/*
+ * Swaps the given container with the first (master) container of its
+ * workspace.
+ *
+ */
+static bool swap_with_master(Con *target) {
+    Con *container = layout_container_for(target);
+    if (container == NULL) {
+        return false;
+    }
+
+    Con *master = TAILQ_FIRST(&(container->nodes_head));
+    Con *con = climb_to_container(target, container);
+
+    if (master == NULL || con == NULL || master == con) {
+        return false;
+    }
+
+    if (!con_swap(master, con)) {
+        return false;
+    }
+
+    con_focus(con_descend_focused(con));
+    return true;
+}
+
+/*
+ * Returns the split direction that the dwindle layout uses for the given
+ * container, based on its position within its parent.
+ *
+ */
+static int dwindle_split_for(Con *con) {
+    if (con->split_direction == 0 || con->split_direction == 1) {
+        return con->split_direction;
+    }
+
+    Con *parent = con->parent;
+    if (parent == NULL) {
+        return 0;
+    }
+
+    int idx = 0;
+    Con *child;
+    TAILQ_FOREACH (child, &(parent->nodes_head), nodes) {
+        if (child == con) {
+            break;
+        }
+        idx++;
+    }
+
+    return (idx % 2 == 0) ? 0 : 1;
+}
+
+/*
+ * Toggles the split direction of the given container in the dwindle layout.
+ *
+ */
+static bool toggle_split(Con *target) {
+    Con *container = layout_container_for(target);
+    if (container == NULL || container->layout != L_DWINDLE) {
+        return false;
+    }
+
+    Con *con = climb_to_container(target, container);
+    if (con == NULL) {
+        return false;
+    }
+
+    /* The last tile always fills the remaining space, so toggling its own
+     * split direction has no visible effect: toggle the split before it
+     * instead, which is the one that shaped the last tile. */
+    if (TAILQ_NEXT(con, nodes) == NULL) {
+        Con *prev = TAILQ_PREV(con, nodes_head, nodes);
+        if (prev != NULL) {
+            con = prev;
+        }
+    }
+
+    con->split_direction = (dwindle_split_for(con) == 0) ? 1 : 0;
+    return true;
+}
+
+/*
+ * Toggles pseudotiling of the given container in the dwindle layout. A
+ * pseudotiled container keeps its current size and is centered inside its
+ * tile.
+ *
+ */
+static bool toggle_pseudo(Con *target) {
+    Con *container = layout_container_for(target);
+    if (container == NULL || container->layout != L_DWINDLE) {
+        return false;
+    }
+
+    Con *con = climb_to_container(target, container);
+    if (con == NULL) {
+        return false;
+    }
+
+    con->pseudo = !con->pseudo;
+    if (con->pseudo) {
+        /* Like Hyprland, a pseudotiled window keeps its own (floating) size
+         * and is centered inside its tile. If the window does not advertise a
+         * useful size, fall back to two thirds of the tile. */
+        int width = 0;
+        int height = 0;
+        if (con_is_leaf(con) && con->window != NULL) {
+            width = con->geometry.width;
+            height = con->geometry.height;
+        }
+
+        if (width < 80 || height < 80) {
+            width = con->rect.width * 2 / 3;
+            height = con->rect.height * 2 / 3;
+        }
+
+        con->pseudo_width = width;
+        con->pseudo_height = height;
+    }
+
+    return true;
+}
+
+/*
+ * Implementation of 'focusmaster': focuses the master container of the current
+ * workspace (the first container of the master/dwindle layout).
+ *
+ */
+void cmd_focusmaster(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool found = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        if (focus_master(current->con)) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        yerror("No master container found.");
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'swapwithmaster': swaps the focused container with the
+ * master container of the current workspace.
+ *
+ */
+void cmd_swap_with_master(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool swapped = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        if (swap_with_master(current->con)) {
+            swapped = true;
+            break;
+        }
+    }
+
+    if (!swapped) {
+        yerror("Could not swap with the master container.");
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'togglesplit': toggles the split direction of the focused
+ * container in the dwindle layout.
+ *
+ */
+void cmd_toggle_split(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool toggled = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        if (toggle_split(current->con)) {
+            toggled = true;
+        }
+    }
+
+    if (!toggled) {
+        yerror("togglesplit only works in the dwindle layout.");
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'pseudo': toggles pseudotiling of the focused container in
+ * the dwindle layout.
+ *
+ */
+void cmd_pseudo(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool toggled = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        if (toggle_pseudo(current->con)) {
+            toggled = true;
+        }
+    }
+
+    if (!toggled) {
+        yerror("pseudo only works in the dwindle layout.");
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'centerwindow': centers the focused floating container on
+ * its workspace.
+ *
+ */
+void cmd_center_window(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool centered = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        Con *con = current->con;
+        if (!con_is_floating(con)) {
+            yerror("Only floating windows can be centered.");
+            return;
+        }
+
+        Con *ws = con_get_workspace(con);
+        if (ws == NULL) {
+            continue;
+        }
+
+        /* Floating windows are wrapped in a CT_FLOATING_CON which holds the
+         * geometry that is actually rendered. */
+        Con *floating = con;
+        if (floating->parent != NULL && floating->parent->type == CT_FLOATING_CON) {
+            floating = floating->parent;
+        }
+
+        floating->rect.x = ws->rect.x + (ws->rect.width - floating->rect.width) / 2;
+        floating->rect.y = ws->rect.y + (ws->rect.height - floating->rect.height) / 2;
+        centered = true;
+    }
+
+    if (!centered) {
+        yerror("Could not center the window.");
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'layoutmsg <message>': Hyprland-style layout messages for
+ * the dwindle and master layouts.
+ *
+ */
+void cmd_layoutmsg(I3_CMD, const char *message) {
+    HANDLE_EMPTY_MATCH;
+
+    if (message == NULL) {
+        yerror("layoutmsg requires an argument.");
+        return;
+    }
+
+    while (*message == ' ' || *message == '\t') {
+        message++;
+    }
+
+    Con *container = layout_container_for(focused);
+    const layout_t layout = container != NULL ? container->layout : L_SPLITH;
+
+    bool ok = false;
+
+    if (strcasecmp(message, "togglesplit") == 0) {
+        ok = toggle_split(focused);
+    } else if (strcasecmp(message, "pseudo") == 0) {
+        ok = toggle_pseudo(focused);
+    } else if (strcasecmp(message, "focusmaster") == 0) {
+        ok = focus_master(focused);
+    } else if (strcasecmp(message, "swapwithmaster") == 0) {
+        ok = swap_with_master(focused);
+    } else if (strcasecmp(message, "orientationleft") == 0 ||
+               strcasecmp(message, "orientationright") == 0 ||
+               strcasecmp(message, "orientationtop") == 0 ||
+               strcasecmp(message, "orientationbottom") == 0) {
+        if (layout != L_MASTER) {
+            yerror("layoutmsg %s requires the master layout.", message);
+            return;
+        }
+        if (strcasecmp(message, "orientationleft") == 0) {
+            config.master_orientation = 0;
+        } else if (strcasecmp(message, "orientationright") == 0) {
+            config.master_orientation = 1;
+        } else if (strcasecmp(message, "orientationtop") == 0) {
+            config.master_orientation = 2;
+        } else {
+            config.master_orientation = 3;
+        }
+        ok = true;
+    } else if (strncasecmp(message, "setproportion", strlen("setproportion")) == 0 ||
+               strncasecmp(message, "proportion", strlen("proportion")) == 0) {
+        /* Hyprland/mangowc style: adjust the width of the focused column in
+         * the scroller layout. "layoutmsg setproportion 0.6" sets an
+         * absolute value, "layoutmsg proportion +0.05" adjusts it. */
+        const char *arg = message + (strncasecmp(message, "setproportion", 13) == 0 ? 13 : 10);
+        while (*arg == ' ' || *arg == '\t') {
+            arg++;
+        }
+
+        if (*arg == '\0') {
+            yerror("layoutmsg %s requires a value.", message);
+            return;
+        }
+
+        if (container == NULL || container->layout != L_SCROLLER) {
+            yerror("layoutmsg %s requires the scroller layout.", message);
+            return;
+        }
+
+        Con *tile = climb_to_container(focused, container);
+        if (tile == NULL) {
+            yerror("Could not find the focused tile.");
+            return;
+        }
+
+        const bool relative = (*arg == '+' || *arg == '-');
+        double proportion = strtod(arg, NULL);
+        if (relative) {
+            double current = tile->scroller_proportion;
+            if (current <= 0.01) {
+                current = config.scroller_proportion;
+            }
+            proportion += current;
+        }
+
+        if (proportion < 0.1) {
+            proportion = 0.1;
+        }
+        if (proportion > 1.0) {
+            proportion = 1.0;
+        }
+
+        tile->scroller_proportion = (float)proportion;
+        ok = true;
+    } else if (strcasecmp(message, "cyclenext") == 0) {
+        Con *next = con_descend_focused(focused);
+        tree_next(next, D_RIGHT);
+        ok = true;
+    } else {
+        yerror("Unknown layoutmsg \"%s\".", message);
+        return;
+    }
+
+    if (!ok) {
+        yerror("layoutmsg \"%s\" did not apply to the current container.", message);
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Collects all leaf containers of the given container in tree order.
+ *
+ */
+static void collect_leaves(Con *con, Con **leaves, int *count, int max) {
+    if (*count >= max) {
+        return;
+    }
+
+    if (con_is_leaf(con)) {
+        if (con->window != NULL) {
+            leaves[(*count)++] = con;
+        }
+        return;
+    }
+
+    Con *child;
+    TAILQ_FOREACH (child, &(con->nodes_head), nodes) {
+        collect_leaves(child, leaves, count, max);
+    }
+}
+
+/*
+ * Focuses the next or previous window of the focused workspace, wrapping
+ * around at the ends (Hyprland's cyclenext/cycleprev).
+ *
+ */
+static bool cycle_focus(bool forward) {
+    Con *container = layout_container_for(focused);
+    if (container == NULL) {
+        return false;
+    }
+
+    Con **leaves = smalloc(256 * sizeof(Con *));
+    int count = 0;
+    collect_leaves(container, leaves, &count, 256);
+
+    if (count == 0) {
+        FREE(leaves);
+        return false;
+    }
+
+    Con *current = con_descend_focused(focused);
+    int index = -1;
+    for (int i = 0; i < count; i++) {
+        if (leaves[i] == current || con_has_parent(current, leaves[i])) {
+            index = i;
+            break;
+        }
+    }
+
+    int next;
+    if (index == -1) {
+        next = forward ? 0 : count - 1;
+    } else {
+        next = (index + (forward ? 1 : -1) + count) % count;
+    }
+
+    Con *target = leaves[next];
+    FREE(leaves);
+
+    con_focus(con_descend_focused(target));
+    return true;
+}
+
+void cmd_cycle_next(I3_CMD) {
+    if (!cycle_focus(true)) {
+        yerror("Could not cycle to the next window.");
+        return;
+    }
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+void cmd_cycle_prev(I3_CMD) {
+    if (!cycle_focus(false)) {
+        yerror("Could not cycle to the previous window.");
+        return;
+    }
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'zoom': moves the focused container to the first position
+ * of its layout container, which makes it the master container (mangowc's
+ * zoom).
+ *
+ */
+void cmd_zoom(I3_CMD) {
+    HANDLE_EMPTY_MATCH;
+
+    bool zoomed = false;
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        if (swap_with_master(current->con)) {
+            zoomed = true;
+            break;
+        }
+    }
+
+    if (!zoomed) {
+        /* Already the first container – that is not an error. */
+        ysuccess(true);
+        return;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'swapdir <left|right|up|down>': swaps the focused
+ * container with the container in the given direction (mangowc's
+ * exchange_client).
+ *
+ */
+void cmd_swapdir(I3_CMD, const char *direction) {
+    HANDLE_EMPTY_MATCH;
+
+    direction_t dir;
+    if (strcasecmp(direction, "left") == 0) {
+        dir = D_LEFT;
+    } else if (strcasecmp(direction, "right") == 0) {
+        dir = D_RIGHT;
+    } else if (strcasecmp(direction, "up") == 0) {
+        dir = D_UP;
+    } else if (strcasecmp(direction, "down") == 0) {
+        dir = D_DOWN;
+    } else {
+        yerror("Invalid direction \"%s\", expected left, right, up or down.", direction);
+        return;
+    }
+
+    Con *source = con_descend_focused(focused);
+    tree_next(source, dir);
+    Con *target = focused;
+
+    if (target == NULL || target == source) {
+        yerror("No container in that direction.");
+        return;
+    }
+
+    if (!con_swap(source, target)) {
+        yerror("Could not swap the containers.");
+        return;
+    }
+
+    con_focus(source);
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
 }

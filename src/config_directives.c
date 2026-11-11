@@ -382,13 +382,9 @@ CFGFUN(default_orientation, const char *orientation) {
 }
 
 CFGFUN(workspace_layout, const char *layout) {
-    if (strcmp(layout, "default") == 0) {
+    if (!layout_from_name(layout, &config.default_layout)) {
+        ELOG("Unknown workspace layout \"%s\", falling back to default\n", layout);
         config.default_layout = L_DEFAULT;
-    } else if (strcmp(layout, "stacking") == 0 ||
-               strcmp(layout, "stacked") == 0) {
-        config.default_layout = L_STACKED;
-    } else {
-        config.default_layout = L_TABBED;
     }
 }
 
@@ -967,4 +963,365 @@ CFGFUN(bar_finish) {
     TAILQ_INSERT_TAIL(&barconfigs, current_bar, configs);
     /* Simply reset the pointer, but don't free the resources. */
     current_bar = NULL;
+}
+/*
+ * Clamps an opacity value (0.0 - 1.0) read from the configuration.
+ *
+ */
+static double parse_opacity(const char *value) {
+    double opacity = strtod(value, NULL);
+    if (opacity < 0.0) {
+        opacity = 0.0;
+    } else if (opacity > 1.0) {
+        opacity = 1.0;
+    }
+    return opacity;
+}
+
+CFGFUN(animations, const char *value) {
+    config.animations = boolstr(value);
+    DLOG("animations = %d\n", config.animations);
+}
+
+/*
+ * Trims leading and trailing whitespace of a token in place.
+ *
+ */
+static char *cfg_trim(char *str) {
+    if (str == NULL) {
+        return NULL;
+    }
+
+    while (*str == ' ' || *str == '\t') {
+        str++;
+    }
+
+    char *end = str + strlen(str);
+    while (end > str && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    *end = '\0';
+
+    return str;
+}
+
+CFGFUN(bezier, const char *spec) {
+    char *copy = sstrdup(spec);
+    char *saveptr = NULL;
+    char *name = cfg_trim(strtok_r(copy, ",", &saveptr));
+    char *x1 = cfg_trim(strtok_r(NULL, ",", &saveptr));
+    char *y1 = cfg_trim(strtok_r(NULL, ",", &saveptr));
+    char *x2 = cfg_trim(strtok_r(NULL, ",", &saveptr));
+    char *y2 = cfg_trim(strtok_r(NULL, ",", &saveptr));
+
+    if (name == NULL || y2 == NULL) {
+        ELOG("Invalid bezier curve definition \"%s\", expected "
+             "\"bezier <name>, <x1>, <y1>, <x2>, <y2>\"\n",
+             spec);
+        FREE(copy);
+        return;
+    }
+
+    animation_register_bezier(name, strtod(x1, NULL), strtod(y1, NULL),
+                              strtod(x2, NULL), strtod(y2, NULL));
+    DLOG("registered bezier curve \"%s\"\n", name);
+    FREE(copy);
+}
+
+CFGFUN(animation, const char *spec) {
+    char *copy = sstrdup(spec);
+    char *saveptr = NULL;
+    char *kind = cfg_trim(strtok_r(copy, ",", &saveptr));
+    char *enabled = cfg_trim(strtok_r(NULL, ",", &saveptr));
+    char *duration = cfg_trim(strtok_r(NULL, ",", &saveptr));
+    char *curve = cfg_trim(strtok_r(NULL, ",", &saveptr));
+
+    if (kind == NULL || *kind == '\0') {
+        ELOG("Invalid animation definition \"%s\", expected "
+             "\"animation <type>, <enabled>, <duration>, <curve>\"\n",
+             spec);
+        FREE(copy);
+        return;
+    }
+
+    const bool on = (enabled != NULL && *enabled != '\0') ? boolstr(enabled) : true;
+    const int ms = (duration != NULL && *duration != '\0') ? atoi(duration) : 0;
+    const bool have_curve = (curve != NULL && *curve != '\0');
+
+    const bool global = (strcasecmp(kind, "global") == 0);
+    bool matched = false;
+
+    if (global || strcasecmp(kind, "windows") == 0 ||
+        strcasecmp(kind, "windowsmove") == 0) {
+        config.animation_duration = on ? ms : 0;
+        if (have_curve) {
+            snprintf(config.animation_curve, sizeof(config.animation_curve), "%s", curve);
+        }
+        matched = true;
+    }
+
+    if (global || strcasecmp(kind, "windowsin") == 0 ||
+        strcasecmp(kind, "windowopen") == 0) {
+        config.animation_open_duration = on ? ms : 0;
+        if (have_curve) {
+            snprintf(config.animation_open_curve, sizeof(config.animation_open_curve),
+                     "%s", curve);
+        }
+        matched = true;
+    }
+
+    if (global || strcasecmp(kind, "windowsout") == 0 ||
+        strcasecmp(kind, "windowclose") == 0) {
+        config.animation_close_duration = on ? ms : 0;
+        if (have_curve) {
+            snprintf(config.animation_close_curve, sizeof(config.animation_close_curve),
+                     "%s", curve);
+        }
+        matched = true;
+    }
+
+    if (global || strcasecmp(kind, "fade") == 0 || strcasecmp(kind, "fadein") == 0 ||
+        strcasecmp(kind, "fadeout") == 0) {
+        config.animation_fade = on;
+        matched = true;
+    }
+
+    if (global || strcasecmp(kind, "workspaces") == 0) {
+        config.animation_workspace_duration = on ? ms : 0;
+        if (have_curve) {
+            snprintf(config.animation_workspace_curve,
+                     sizeof(config.animation_workspace_curve), "%s", curve);
+        }
+        matched = true;
+    }
+
+    if (!matched) {
+        ELOG("Unknown animation type \"%s\", expected one of windows, "
+             "windowsIn, windowsOut, fadeIn, fadeOut, workspaces, global\n",
+             kind);
+    }
+
+    FREE(copy);
+}
+
+CFGFUN(master_ratio, const char *value) {
+    double ratio = strtod(value, NULL);
+    if (ratio < 0.1 || ratio > 0.9) {
+        ELOG("master_ratio must be between 0.1 and 0.9, ignoring \"%s\"\n", value);
+        return;
+    }
+    config.master_ratio = ratio;
+    DLOG("master_ratio = %f\n", config.master_ratio);
+}
+
+CFGFUN(active_opacity, const char *value) {
+    config.active_opacity = parse_opacity(value);
+}
+
+CFGFUN(inactive_opacity, const char *value) {
+    config.inactive_opacity = parse_opacity(value);
+}
+
+CFGFUN(dim_inactive, const char *value) {
+    config.dim_inactive = boolstr(value);
+}
+
+CFGFUN(dim_strength, const char *value) {
+    config.dim_strength = parse_opacity(value);
+}
+
+/*
+ * Sets the corner rounding radius in pixels.
+ *
+ */
+CFGFUN(rounding, const char *value) {
+    const long radius = strtol(value, NULL, 10);
+    if (radius < 0 || radius > 100) {
+        ELOG("rounding must be between 0 and 100, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.rounding = logical_px(radius);
+    DLOG("rounding = %d\n", config.rounding);
+}
+
+/*
+ * Hyprland-style alias for the width of the border ("default_border pixel N"
+ * only changes the width, the border style is controlled by "titlebar").
+ *
+ */
+CFGFUN(border_size, const char *value) {
+    const long width = strtol(value, NULL, 10);
+    if (width < 0 || width > 100) {
+        ELOG("border_size must be between 0 and 100, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.default_border_width = logical_px(width);
+    config.default_floating_border_width = logical_px(width);
+}
+
+/*
+ * Hyprland-style aliases for "gaps inner <px>" / "gaps outer <px>".
+ *
+ */
+CFGFUN(gaps_in, const char *value) {
+    apply_gaps(&config.gaps, GAPS_INNER, logical_px(strtol(value, NULL, 10)));
+}
+
+CFGFUN(gaps_out, const char *value) {
+    apply_gaps(&config.gaps, GAPS_OUTER, logical_px(strtol(value, NULL, 10)));
+}
+
+/*
+ * Title bar geometry, Hyprland-style.
+ *
+ */
+CFGFUN(titlebar_height, const char *value) {
+    const long height = strtol(value, NULL, 10);
+    if (height < 0 || height > 200) {
+        ELOG("titlebar_height must be between 0 and 200, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.titlebar_height = height > 0 ? logical_px(height) : 0;
+}
+
+CFGFUN(titlebar_padding, const char *value) {
+    const long padding = strtol(value, NULL, 10);
+    if (padding < 0 || padding > 100) {
+        ELOG("titlebar_padding must be between 0 and 100, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.titlebar_padding = logical_px(padding);
+}
+
+/*
+ * "titlebar normal|none" – hides the title bar entirely when set to none,
+ * which gives the border-only look of a Hyprland window.
+ *
+ */
+CFGFUN(titlebar_visibility, const char *value) {
+    if (strcasecmp(value, "none") == 0 || strcasecmp(value, "off") == 0 ||
+        strcasecmp(value, "hidden") == 0) {
+        config.titlebar_hidden = true;
+        /* New windows get the border-only look right away. */
+        config.default_border = BS_PIXEL;
+        config.default_floating_border = BS_PIXEL;
+    } else if (strcasecmp(value, "normal") == 0 || strcasecmp(value, "on") == 0) {
+        config.titlebar_hidden = false;
+        config.default_border = BS_NORMAL;
+        config.default_floating_border = BS_NORMAL;
+    } else {
+        ELOG("Invalid titlebar mode \"%s\", expected normal or none\n", value);
+    }
+}
+
+/*
+ * Parses a gradient border definition: "#rrggbb #rrggbb [angle]".
+ *
+ */
+static void parse_gradient(struct gradient_spec *spec, const char *start,
+                           const char *end, const long angle, const char *classname) {
+    if (start == NULL || end == NULL || start[0] != '#' || end[0] != '#') {
+        ELOG("Invalid gradient for %s, expected two colors like "
+             "\"#33ccffee #00ff99ee [angle]\"\n",
+             classname);
+        return;
+    }
+
+    spec->start = draw_util_hex_to_color(start);
+    spec->end = draw_util_hex_to_color(end);
+    spec->angle = (int)((angle % 360 + 360) % 360);
+    spec->enabled = true;
+
+    DLOG("gradient for %s: %s -> %s at %d degrees\n",
+         classname, start, end, spec->angle);
+}
+
+CFGFUN(client_gradient_focused, const char *start, const char *end, const long angle) {
+    parse_gradient(&config.client_gradients.focused, start, end, angle, "client.focused");
+}
+
+CFGFUN(client_gradient_focused_inactive, const char *start, const char *end, const long angle) {
+    parse_gradient(&config.client_gradients.focused_inactive, start, end, angle,
+                   "client.focused_inactive");
+}
+
+CFGFUN(client_gradient_unfocused, const char *start, const char *end, const long angle) {
+    parse_gradient(&config.client_gradients.unfocused, start, end, angle, "client.unfocused");
+}
+
+CFGFUN(client_gradient_urgent, const char *start, const char *end, const long angle) {
+    parse_gradient(&config.client_gradients.urgent, start, end, angle, "client.urgent");
+}
+
+/*
+ * Fraction of the tile used by the first part of a dwindle split.
+ *
+ */
+CFGFUN(dwindle_split_ratio, const char *value) {
+    const double ratio = strtod(value, NULL);
+    if (ratio < 0.1 || ratio > 0.9) {
+        ELOG("dwindle_split_ratio must be between 0.1 and 0.9, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.dwindle_split_ratio = ratio;
+}
+
+/*
+ * Scroller layout configuration (ported from mangowc).
+ *
+ */
+CFGFUN(scroller_proportion, const char *value) {
+    const double proportion = strtod(value, NULL);
+    if (proportion < 0.1 || proportion > 1.0) {
+        ELOG("scroller_proportion must be between 0.1 and 1.0, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.scroller_proportion = proportion;
+}
+
+CFGFUN(scroller_structs, const char *value) {
+    const long pixels = strtol(value, NULL, 10);
+    if (pixels < 0 || pixels > 1000) {
+        ELOG("scroller_structs must be between 0 and 1000, ignoring \"%s\"\n", value);
+        return;
+    }
+
+    config.scroller_structs = logical_px(pixels);
+}
+
+CFGFUN(scroller_focus_center, const char *value) {
+    config.scroller_focus_center = boolstr(value);
+}
+
+CFGFUN(scroller_prefer_center, const char *value) {
+    config.scroller_prefer_center = boolstr(value);
+}
+
+CFGFUN(scroller_prefer_overspread, const char *value) {
+    config.scroller_prefer_overspread = boolstr(value);
+}
+
+CFGFUN(scroller_proportion_single, const char *value) {
+    /* mangowc's scroller_ignore_proportion_single is the inverse of what we
+     * store, so that "no" keeps the upstream i3 behaviour of the single
+     * window filling the screen. */
+    config.scroller_proportion_single = !boolstr(value);
+}
+
+CFGFUN(scroller_default_proportion_single, const char *value) {
+    const double proportion = strtod(value, NULL);
+    if (proportion < 0.1 || proportion > 1.0) {
+        ELOG("scroller_default_proportion_single must be between 0.1 and 1.0, "
+             "ignoring \"%s\"\n",
+             value);
+        return;
+    }
+
+    config.scroller_default_proportion_single = proportion;
 }

@@ -343,3 +343,24 @@ void cmd_gaps(I3_CMD, const char *type, const char *scope, const char *mode, con
  *
  */
 void cmd_title_window_icon(I3_CMD, const char *enable, int padding);
+
+void cmd_focusmaster(I3_CMD);
+void cmd_swap_with_master(I3_CMD);
+void cmd_toggle_split(I3_CMD);
+void cmd_pseudo(I3_CMD);
+void cmd_center_window(I3_CMD);
+void cmd_layoutmsg(I3_CMD, const char *message);
+void cmd_cycle_next(I3_CMD);
+void cmd_cycle_prev(I3_CMD);
+
+/**
+ * Implementation of 'zoom'
+ *
+ */
+void cmd_zoom(I3_CMD);
+
+/**
+ * Implementation of 'swapdir <direction>'
+ *
+ */
+void cmd_swapdir(I3_CMD, const char *direction);
