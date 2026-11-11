@@ -14,6 +14,7 @@
 
 /* Forward declarations */
 static int *precalculate_sizes(Con *con, render_params *p);
+static Rect *precalculate_layout_rects(Con *con, render_params *p);
 static void render_root(Con *con, Con *fullscreen);
 static void render_output(Con *con);
 static void render_con_split(Con *con, Con *child, render_params *p, int i);
@@ -148,6 +149,7 @@ void render_con(Con *con) {
 
     /* precalculate the sizes to be able to correct rounding errors */
     params.sizes = precalculate_sizes(con, &params);
+    params.layout_rects = precalculate_layout_rects(con, &params);
 
     if (con->layout == L_OUTPUT) {
         /* Skip i3-internal outputs */
@@ -227,6 +229,7 @@ void render_con(Con *con) {
 
 free_params:
     FREE(params.sizes);
+    FREE(params.layout_rects);
 }
 
 static int *precalculate_sizes(Con *con, render_params *p) {
@@ -527,213 +530,258 @@ static void render_leaf_deco(Con *child, int deco_height) {
 }
 
 /*
+ * Precalculates the rectangle of every child of the given container for the
+ * dwindle and scroller layouts. Both layouts derive the geometry of all
+ * children from the container rect at once, so computing it a single time per
+ * render pass — instead of once per child — turns the per-container work from
+ * O(n²) into O(n). This matters because tree_render() runs at animation frame
+ * rate.
+ *
+ */
+static Rect *precalculate_layout_rects(Con *con, render_params *p) {
+    if (p->children <= 0 ||
+        (con->layout != L_DWINDLE && con->layout != L_SCROLLER)) {
+        return NULL;
+    }
+
+    Rect *rects = smalloc((size_t)p->children * sizeof(Rect));
+
+    if (con->layout == L_SCROLLER) {
+        int count = 0;
+        int focus_index = -1;
+        Con *cur;
+        TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+            if (cur == focused || con_inside_focused(cur)) {
+                focus_index = count;
+            }
+            count++;
+        }
+
+        if (focus_index < 0) {
+            focus_index = 0;
+        }
+
+        /* Space which is kept free at both sides of the scroller area. */
+        int structs = config.scroller_structs;
+        if (structs < 0) {
+            structs = 0;
+        }
+
+        int max_width = (int)p->rect.width - 2 * structs;
+        if (max_width < 1) {
+            max_width = (int)p->rect.width;
+            structs = 0;
+        }
+
+        /* Collect the width of every column. The common case fits comfortably
+         * into stack buffers; only workspaces with many columns fall back to
+         * the heap. */
+        int widths_stack[128];
+        int positions_stack[128];
+        int *widths = widths_stack;
+        int *positions = positions_stack;
+        const bool heap_alloc = count > (int)(sizeof(widths_stack) / sizeof(widths_stack[0]));
+        if (heap_alloc) {
+            widths = smalloc(sizeof(int) * (size_t)count);
+            positions = smalloc(sizeof(int) * (size_t)count);
+        }
+
+        int idx = 0;
+        TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+            double proportion = cur->scroller_proportion;
+            if (proportion <= 0.01) {
+                proportion = config.scroller_proportion;
+            }
+            if (count == 1 && config.scroller_proportion_single) {
+                proportion = config.scroller_default_proportion_single;
+            }
+
+            int width = (int)lround((double)max_width * proportion);
+            if (width < 1) {
+                width = 1;
+            }
+            if ((uint32_t)width > p->rect.width) {
+                width = (int)p->rect.width;
+            }
+            widths[idx++] = width;
+        }
+
+        const bool single = (count == 1);
+        const bool at_edge = (focus_index == 0 || focus_index == count - 1);
+
+        /* Decide whether the focused column is centered or anchored to the
+         * edge it is closest to. This mirrors mangowc's priority:
+         * focus_center > prefer_center > overspread. */
+        bool center;
+        if (single && !config.scroller_proportion_single) {
+            center = false;
+        } else if (config.scroller_focus_center || single) {
+            center = true;
+        } else if (at_edge && config.scroller_prefer_overspread) {
+            center = false;
+        } else {
+            center = config.scroller_prefer_center;
+        }
+
+        int focus_x;
+        if (single && !config.scroller_proportion_single) {
+            /* A single window fills the whole area, like in every other i3
+             * layout. */
+            widths[0] = (int)p->rect.width;
+            focus_x = (int)p->rect.x;
+        } else if (center) {
+            focus_x = (int)p->rect.x + ((int)p->rect.width - widths[focus_index]) / 2;
+        } else if (focus_index * 2 < count) {
+            /* Anchor the focused column to the left edge and let the
+             * following columns run off the right edge. */
+            focus_x = (int)p->rect.x + structs;
+        } else {
+            focus_x = (int)p->rect.x + (int)p->rect.width - structs - widths[focus_index];
+        }
+
+        positions[focus_index] = focus_x;
+        for (int j = focus_index + 1; j < count; j++) {
+            positions[j] = positions[j - 1] + widths[j - 1];
+        }
+        for (int j = focus_index - 1; j >= 0; j--) {
+            positions[j] = positions[j + 1] - widths[j];
+        }
+
+        idx = 0;
+        TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+            /* Columns may be scrolled out of the visible area; negative
+             * coordinates are truncated to 16 bit by the X server, which
+             * results in exactly the clipping a compositor would do. */
+            rects[idx] = (Rect){
+                (uint32_t)positions[idx],
+                p->rect.y,
+                (uint32_t)widths[idx],
+                p->rect.height,
+            };
+            idx++;
+        }
+
+        if (heap_alloc) {
+            free(widths);
+            free(positions);
+        }
+    } else {
+        /* L_DWINDLE: every container except the last one takes a fraction of
+         * the remaining space, alternating between a horizontal and a
+         * vertical split. This produces the characteristic staircase shape. */
+        Rect remaining = p->rect;
+        orientation_t next_orientation = HORIZ;
+        int idx = 0;
+        Con *cur;
+        TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
+            const bool last = (TAILQ_NEXT(cur, nodes) == NULL);
+
+            /* `togglesplit` stores an explicit split direction per container,
+             * -1 means "keep alternating". */
+            orientation_t orientation = next_orientation;
+            if (cur->split_direction == 0) {
+                orientation = HORIZ;
+            } else if (cur->split_direction == 1) {
+                orientation = VERT;
+            }
+
+            Rect rect = remaining;
+            if (!last) {
+                /* dwindle_split_ratio controls how much of the remaining
+                 * space the first part of a split takes (mangowc's
+                 * dwindle_split_ratio). */
+                double ratio = config.dwindle_split_ratio;
+                if (ratio < 0.1 || ratio > 0.9) {
+                    ratio = 0.5;
+                }
+
+                if (orientation == HORIZ) {
+                    rect.width = (uint32_t)MAX(1, (int)lround((double)remaining.width * ratio));
+                } else {
+                    rect.height = (uint32_t)MAX(1, (int)lround((double)remaining.height * ratio));
+                }
+            }
+
+            rects[idx++] = rect;
+            if (last) {
+                break;
+            }
+
+            if (orientation == HORIZ) {
+                remaining.x += rect.width;
+                remaining.width -= rect.width;
+            } else {
+                remaining.y += rect.height;
+                remaining.height -= rect.height;
+            }
+
+            next_orientation = (orientation == HORIZ) ? VERT : HORIZ;
+        }
+    }
+
+    return rects;
+}
+
+/*
  * Scroller layout (ported from mangowc): every container is a column whose
  * width is a fraction of the available monitor width. The focused column is
  * kept visible by centering it (or by anchoring it to the left/right edge),
  * the other columns are positioned relative to it. Columns may be wider than
  * the monitor, in which case they simply scroll out of the visible area.
  *
+ * The geometry of all columns is computed once per render pass by
+ * precalculate_layout_rects(); this function only distributes the results.
+ *
  */
 static void render_con_scroller(Con *con, Con *child, render_params *p, int i) {
     assert(con->layout == L_SCROLLER);
 
-    int count = 0;
-    int focus_index = -1;
-    Con *cur;
-    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
-        if (cur == focused || con_inside_focused(cur)) {
-            focus_index = count;
-        }
-        count++;
-    }
-
-    if (count == 0) {
+    if (p->layout_rects == NULL) {
         child->rect = p->rect;
         render_leaf_deco(child, p->deco_height);
         return;
     }
 
-    if (focus_index < 0) {
-        focus_index = 0;
-    }
-
-    /* Space which is kept free at both sides of the scroller area. */
-    int structs = config.scroller_structs;
-    if (structs < 0) {
-        structs = 0;
-    }
-
-    int max_width = (int)p->rect.width - 2 * structs;
-    if (max_width < 1) {
-        max_width = (int)p->rect.width;
-        structs = 0;
-    }
-
-    /* Collect the width of every column. */
-    int *widths = smalloc(sizeof(int) * (size_t)count);
-    int *positions = smalloc(sizeof(int) * (size_t)count);
-
-    int idx = 0;
-    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
-        double proportion = cur->scroller_proportion;
-        if (proportion <= 0.01) {
-            proportion = config.scroller_proportion;
-        }
-        if (count == 1 && config.scroller_proportion_single) {
-            proportion = config.scroller_default_proportion_single;
-        }
-
-        int width = (int)lround((double)max_width * proportion);
-        if (width < 1) {
-            width = 1;
-        }
-        if ((uint32_t)width > p->rect.width) {
-            width = (int)p->rect.width;
-        }
-        widths[idx++] = width;
-    }
-
-    const bool single = (count == 1);
-    const bool at_edge = (focus_index == 0 || focus_index == count - 1);
-
-    /* Decide whether the focused column is centered or anchored to the edge
-     * it is closest to. This mirrors mangowc's priority:
-     * focus_center > prefer_center > overspread. */
-    bool center;
-    if (single && !config.scroller_proportion_single) {
-        center = false;
-    } else if (config.scroller_focus_center || single) {
-        center = true;
-    } else if (at_edge && config.scroller_prefer_overspread) {
-        center = false;
-    } else {
-        center = config.scroller_prefer_center;
-    }
-
-    int focus_x;
-    if (single && !config.scroller_proportion_single) {
-        /* A single window fills the whole area, like in every other i3
-         * layout. */
-        widths[0] = (int)p->rect.width;
-        focus_x = (int)p->rect.x;
-    } else if (center) {
-        focus_x = (int)p->rect.x + ((int)p->rect.width - widths[focus_index]) / 2;
-    } else if (focus_index * 2 < count) {
-        /* Anchor the focused column to the left edge and let the following
-         * columns run off the right edge. */
-        focus_x = (int)p->rect.x + structs;
-    } else {
-        focus_x = (int)p->rect.x + (int)p->rect.width - structs - widths[focus_index];
-    }
-
-    positions[focus_index] = focus_x;
-    for (int j = focus_index + 1; j < count; j++) {
-        positions[j] = positions[j - 1] + widths[j - 1];
-    }
-    for (int j = focus_index - 1; j >= 0; j--) {
-        positions[j] = positions[j + 1] - widths[j];
-    }
-
-    /* Columns may be scrolled out of the visible area; negative coordinates
-     * are truncated to 16 bit by the X server, which results in exactly the
-     * clipping a compositor would do. */
-    child->rect = (Rect){
-        (uint32_t)positions[i],
-        p->rect.y,
-        (uint32_t)widths[i],
-        p->rect.height,
-    };
-
-    free(widths);
-    free(positions);
-
+    child->rect = p->layout_rects[i];
     render_leaf_deco(child, p->deco_height);
 }
 
 /*
  * Dwindle layout (Hyprland's default): every container except the last one
- * takes half of the remaining space, alternating between a horizontal and a
- * vertical split. This produces the characteristic staircase shape.
+ * takes a fraction of the remaining space, alternating between a horizontal
+ * and a vertical split. This produces the characteristic staircase shape.
+ *
+ * The geometry of all children is computed once per render pass by
+ * precalculate_layout_rects(); this function only distributes the results.
  *
  */
 static void render_con_dwindle(Con *con, Con *child, render_params *p, int i) {
     assert(con->layout == L_DWINDLE);
 
-    Rect remaining = p->rect;
-    orientation_t next_orientation = HORIZ;
-    int idx = 0;
-    Con *cur;
-
-    TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
-        const bool last = (TAILQ_NEXT(cur, nodes) == NULL);
-
-        /* `togglesplit` stores an explicit split direction per container, -1
-         * means "keep alternating". */
-        orientation_t orientation = next_orientation;
-        if (cur->split_direction == 0) {
-            orientation = HORIZ;
-        } else if (cur->split_direction == 1) {
-            orientation = VERT;
-        }
-
-        Rect rect = remaining;
-
-        if (!last) {
-            /* dwindle_split_ratio controls how much of the remaining space
-             * the first part of a split takes (mangowc's
-             * dwindle_split_ratio). */
-            double ratio = config.dwindle_split_ratio;
-            if (ratio < 0.1 || ratio > 0.9) {
-                ratio = 0.5;
-            }
-
-            if (orientation == HORIZ) {
-                rect.width = (uint32_t)MAX(1, (int)lround((double)remaining.width * ratio));
-            } else {
-                rect.height = (uint32_t)MAX(1, (int)lround((double)remaining.height * ratio));
-            }
-        }
-
-        if (idx == i) {
-            child->rect = rect;
-
-            /* Pseudotiled containers keep their own size and are centered
-             * inside the tile they were assigned. */
-            if (child->pseudo &&
-                child->pseudo_width > 0 && child->pseudo_height > 0 &&
-                (child->pseudo_width < rect.width || child->pseudo_height < rect.height)) {
-                const int width = child->pseudo_width < rect.width ? child->pseudo_width : rect.width;
-                const int height = child->pseudo_height < rect.height ? child->pseudo_height : rect.height;
-                child->rect = (Rect){
-                    rect.x + (rect.width - width) / 2,
-                    rect.y + (rect.height - height) / 2,
-                    width,
-                    height,
-                };
-            }
-
-            render_leaf_deco(child, p->deco_height);
-            return;
-        }
-
-        if (last) {
-            break;
-        }
-
-        if (orientation == HORIZ) {
-            remaining.x += rect.width;
-            remaining.width -= rect.width;
-        } else {
-            remaining.y += rect.height;
-            remaining.height -= rect.height;
-        }
-
-        next_orientation = (orientation == HORIZ) ? VERT : HORIZ;
-        idx++;
+    if (p->layout_rects == NULL) {
+        child->rect = p->rect;
+        render_leaf_deco(child, p->deco_height);
+        return;
     }
 
-    /* Not reached: the caller only renders existing children. */
-    child->rect = p->rect;
+    const Rect rect = p->layout_rects[i];
+    child->rect = rect;
+
+    /* Pseudotiled containers keep their own size and are centered
+     * inside the tile they were assigned. */
+    if (child->pseudo &&
+        child->pseudo_width > 0 && child->pseudo_height > 0 &&
+        (child->pseudo_width < rect.width || child->pseudo_height < rect.height)) {
+        const int width = child->pseudo_width < rect.width ? child->pseudo_width : rect.width;
+        const int height = child->pseudo_height < rect.height ? child->pseudo_height : rect.height;
+        child->rect = (Rect){
+            rect.x + (rect.width - width) / 2,
+            rect.y + (rect.height - height) / 2,
+            width,
+            height,
+        };
+    }
+
     render_leaf_deco(child, p->deco_height);
 }
 

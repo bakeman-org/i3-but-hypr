@@ -39,6 +39,8 @@ static int custom_beziers_count = 0;
 static ev_timer anim_timer;
 static bool timer_started = false;
 
+static bool anim_rect_equals(anim_rect a, anim_rect b);
+
 static xcb_atom_t atom_opacity = XCB_NONE;
 
 /******************************************************************************
@@ -259,7 +261,11 @@ static void animation_start_timer(void) {
 
 static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
     double now = ev_now(EV_A);
-    bool changed = false;
+    /* Only a change of the interpolated geometry requires a full tree render.
+     * Opacity changes are applied directly through window properties and are
+     * visible without re-rendering the layout, so pure fade animations must
+     * not trigger the (comparatively expensive) tree_render() every frame. */
+    bool geometry_changed = false;
 
     Con *con;
     TAILQ_FOREACH (con, &all_cons, all_cons) {
@@ -275,12 +281,12 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
         /* written this way so that a NaN timestamp finishes the animation
          * instead of producing bogus coordinates */
         if (!(t < 1.0)) {
+            geometry_changed |= !anim_rect_equals(anim->cur, anim->to);
             anim->cur = anim->to;
             anim->active = false;
             if (anim->fade) {
                 animation_set_opacity(con, anim->opacity_to);
             }
-            changed = true;
             continue;
         }
 
@@ -288,18 +294,21 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
         if (!isfinite(eased)) {
             eased = 1.0;
         }
-        anim->cur.x = (int32_t)lround(anim->from.x + (anim->to.x - anim->from.x) * eased);
-        anim->cur.y = (int32_t)lround(anim->from.y + (anim->to.y - anim->from.y) * eased);
-        anim->cur.width = (int32_t)lround(anim->from.width + (anim->to.width - anim->from.width) * eased);
-        anim->cur.height = (int32_t)lround(anim->from.height + (anim->to.height - anim->from.height) * eased);
+        anim_rect cur = {
+            .x = (int32_t)lround(anim->from.x + (anim->to.x - anim->from.x) * eased),
+            .y = (int32_t)lround(anim->from.y + (anim->to.y - anim->from.y) * eased),
+            .width = (int32_t)lround(anim->from.width + (anim->to.width - anim->from.width) * eased),
+            .height = (int32_t)lround(anim->from.height + (anim->to.height - anim->from.height) * eased),
+        };
+        geometry_changed |= !anim_rect_equals(cur, anim->cur);
+        anim->cur = cur;
         if (anim->fade) {
             animation_set_opacity(con, anim->opacity_from +
                                           (anim->opacity_to - anim->opacity_from) * eased);
         }
-        changed = true;
     }
 
-    if (changed) {
+    if (geometry_changed) {
         tree_render();
     }
 

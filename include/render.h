@@ -30,6 +30,9 @@ typedef struct render_params {
     int children;
     /* A precalculated list of sizes of each child. */
     int *sizes;
+    /* Precalculated rectangles of each child, used by layouts whose geometry
+     * is computed for the whole container at once (dwindle, scroller). */
+    Rect *layout_rects;
 } render_params;
 
 /**
