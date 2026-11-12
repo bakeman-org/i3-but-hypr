@@ -147,6 +147,37 @@ frame 背景像素改用 `client.background` 主题色，消除黑块与残影�
 `scroller_autofit`（默认 yes）：列窄于屏幕时按比例铺满、列宽不超过屏幕、贴边锚定；
 完全滚出可视区的列不再分配装饰 pixmap（单列约 3.5 MB），滚回来时自动重建。
 
+### 7. Alt+Tab 切换器：选错窗口、松手不生效、预览黑块
+
+现象是"按 Alt+Tab 想切到 firefox，结果还在 zen（或别的窗口）"，只在 3 个以上窗口时明显。
+两条主要原因都修掉了：
+
+- **自动重复（auto-repeat）把选择器推过头**（主因）：按住 Tab 时服务器按重复速率再发若干次
+  KeyPress，选择环从上一个窗口继续前进——3 个窗口时正好又落回"原本要离开的那个"。
+  现在用一个"按键是否仍按下"的状态机过滤重复（同时兼容 XKB detectable auto-repeat 的
+  press-only 和传统模式的 release/press 同时间戳对），**按一次 Tab 只走一格**。
+- **修饰键释放事件丢失**：Alt+Tab 快速轻点时，release 往往在 `xcb_grab_keyboard` 生效前就
+  已投递出去，切换器永远等不到确认事件，面板挂着不提交（用户看到"没反应"）。
+  现在面板打开期间用 libev 定时器（50 ms）轮询 `xcb_query_keymap`，一旦确认修饰键全部松开就提交；
+  打开瞬间也会先查一次，轻点几乎无延迟。`sticky` 模式不受影响。
+- 防御性修复：面板销毁时指针落到下方窗口所产生的 EnterNotify，在 `focus_follows_mouse`
+  （i3 默认开启）下会把焦点设回鼠标下的窗口、静默撤销刚才的选择；现在按
+  `handle_unmap_notify_event()` 的做法忽略与 `DestroyWindow` 同序列号的 EnterNotify
+  （带 GetInputFocus 往返，避免误伤后续真实事件，见 i3 #609），面板自身的 EnterNotify
+  也不再落到 `check_crossing_screen_boundary()`。提交前 `focused_id = XCB_NONE`，
+  强制 `x_push_changes()` 真正下发 `XSetInputFocus`。
+- 候选不再要求 `con->mapped`：tabbed/stacked 里被隐藏的窗口也能被 Alt+Tab 选中
+  （没有预览，退回标题块）；提交时按窗口 id 重新查找容器，避免候选在此期间被关闭的悬垂指针；
+  改用 `con_activate()`，浮动窗口会一并置顶。
+- Shift 只负责反向循环：按下不再被当作"取消"（`Mod1+Tab` 后再按 Shift 以前会直接关掉面板且不切换），
+  松开 Shift 也不再提交；Alt/Meta/Super/Ctrl 松开仍为确认，符合 mangowc 语义。
+- 预览抓图：直接抓窗口可能得到黑图——无合成器时被遮挡区域内容未定义，depth-32 窗口 alpha 为 0
+  则整块透明。现在对采样判定为"全黑/全透明"的抓图退回为窗口 frame 区域的屏幕快照
+  （按 root 尺寸裁剪，恒定按不透明 RGB24 解析）。
+- 实测（Chromium 150 / Firefox Nightly / Zen，均在 `--nest` 内）：20 次连续
+  Alt+Tab 全部命中预期窗口；快速轻点与按住 Tab 均只走一格；浮动窗口遮挡时
+  预览改用屏幕快照，无黑块。
+
 ## 三、性能画像与内存
 
 - **内存**：Xephyr 1280×800、5 窗口、渐变 + 圆角 + 动画全开，i3 RSS ≈ **35 MB**
@@ -190,6 +221,8 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
   零改动，Hyprland 只绑 Super 故零冲突。
 - 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的
   `/usr/local` libxkbcommon（re-exec 前置 `/usr/lib/x86_64-linux-gnu`）。
+- **会话隔离**：子进程额外 `unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设
+  `XDG_SESSION_TYPE=x11`，否则宿主 Wayland 会被客户端优先选中。
 
 ### 3. 视觉默认值（`src/config.c`）
 
@@ -230,9 +263,14 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 
 ## 六、已知问题
 
-- **启动间歇性 SIGSEGV（环境问题，非代码问题）**：`load_keymap()` 崩溃于
-  libxkbcommon 的 `atom_intern`。根因是本机 `/usr/local/lib` 下手工安装的
-  libxkbcommon 有缺陷（i3 链接它优先于系统库）。规避：
-  `LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu` 启动，或卸载/重装该本地副本。
+- **启动 SIGSEGV（环境问题，非代码问题）**：`load_keymap()` → `xkb_x11_keymap_new_from_device`
+  崩溃于 libxkbcommon 的 `atom_intern`。根因已定位到 `/usr/local` 下**两次安装混用**：
+  core 库是 `libxkbcommon.so.0.14.0`（1.14.0-beta1，`/usr/local/lib/x86_64-linux-gnu`），
+  而 `libxkbcommon-x11.so.0` 仍指向 0.13.1（`/usr/local/lib`），二者结构体布局不一致，
+  x11 组件写坏 `xkb_context`，随后 core 内部的 atom 表崩溃。
+  i3 的 `RUNPATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib` 让它优先于系统库加载，
+  所以**重新编译/链接后必然启动即崩**。系统里的 1.7.0-2（core + x11 配套）是好的。
+  规避：`export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu` 后再启动 i3（已验证），
+  或把 `/usr/local` 下的 libxkbcommon / libxkbcommon-x11 重装成同一版本（更干净）。
   已用 git stash 隔离验证：未修改的 fork 代码同样崩溃，与 fork 改动无关。
 - 工作区根目录的历史 `core.*` 均为上述问题产物，可安全删除。

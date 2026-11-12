@@ -358,6 +358,15 @@ static void nest_run(void) {
         /* child: run i3 on the nested display. Xephyr is started by the
          * parent in parallel; wait for it to accept connections. */
         setenv("DISPLAY", disparg, 1);
+        /* Programs started from the nested instance must not talk to the host
+         * session: when WAYLAND_DISPLAY is set (the usual case when i3 runs
+         * nested inside Hyprland/Sway), GTK, Electron and Chromium pick their
+         * Wayland backend and open their windows on the *host* desktop instead
+         * of inside Xephyr. The nested session is X11-only, so hide the host
+         * Wayland socket and advertise a plain X11 session. */
+        unsetenv("WAYLAND_DISPLAY");
+        unsetenv("WAYLAND_SOCKET");
+        setenv("XDG_SESSION_TYPE", "x11", 1);
         /* Drop the host i3's IPC socket path so that this instance gets its
          * own socket, otherwise it refuses to start with "Socket is already
          * in use". */

@@ -54,6 +54,14 @@ void switcher_close(void);
 bool switcher_is_active(void);
 
 /*
+ * Whether the given window is the switcher's own panel. The panel is an
+ * override-redirect window which i3 does not manage, so event handlers must
+ * not treat it like a client window (see handle_enter_notify()).
+ *
+ */
+bool switcher_is_panel(xcb_window_t window);
+
+/*
  * Handles a KeyPress/KeyRelease while the switcher is open. Returns true if
  * the event was consumed (and must not be processed as a binding).
  *

@@ -136,6 +136,13 @@ static void handle_enter_notify(xcb_enter_notify_event_t *event, uint32_t full_s
         DLOG("This was not a normal notify, ignoring\n");
         return;
     }
+    /* The switcher's panel is not managed, so the lookups below would fail and
+     * fall through to check_crossing_screen_boundary(), which may focus a
+     * different output. Entering the panel must not change the focus at all. */
+    if (switcher_is_panel(event->event)) {
+        DLOG("EnterNotify for the switcher panel, ignoring\n");
+        return;
+    }
     /* Some events are not interesting, because they were not generated
      * actively by the user, but by reconfiguration of windows */
     if (event_is_ignored(ENSURE_FULL_SEQUENCE(full_sequence), XCB_ENTER_NOTIFY)) {
