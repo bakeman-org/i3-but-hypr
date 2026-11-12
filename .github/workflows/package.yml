@@ -87,10 +87,10 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           # Tag pushes publish a normal release; branch builds update a
-          # branch-specific "-latest" prerelease so the .deb is always available.
+          # branch-specific "-latest" release so the .deb is always available.
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('{0}-latest', github.ref_name) }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Latest {0} build', github.ref_name) }}
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          prerelease: false
           files: |
             dist/*.deb
-          generate_release_notes: true
+          generate_release_notes: false
