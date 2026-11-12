@@ -242,6 +242,171 @@ static anim_rect dropdown_offscreen(anim_rect target, int position) {
     return offscreen;
 }
 
+/* Maximum number of dropdowns that are laid out at the same time. */
+#define DROPDOWN_MAX_VISIBLE 32
+
+/*
+ * Collects the visible dropdown clients on the given workspace in a stable
+ * order (all_cons preserves creation order). `exclude` is skipped so that a
+ * dropdown which is about to be hidden does not take part in the reflow.
+ *
+ */
+static int dropdown_collect_visible(Con *ws, Con *exclude, Con **clients, int max) {
+    int count = 0;
+    Con *con;
+    TAILQ_FOREACH (con, &all_cons, all_cons) {
+        if (con->type != CT_CON || con->window == NULL || !con->dropdown) {
+            continue;
+        }
+        /* A dropdown that is already sliding out must finish hiding; re-tiling
+         * it here would cancel the hide animation but leave the pending flag
+         * set, which would move it to the scratchpad later. */
+        if (con->anim.dropdown_hide_pending) {
+            continue;
+        }
+        if (con == exclude) {
+            continue;
+        }
+        Con *floating = con_inside_floating(con);
+        if (floating == NULL || con_get_workspace(floating) != ws) {
+            continue;
+        }
+        if (count >= max) {
+            ELOG("dropdown: more than %d visible dropdowns, ignoring the rest\n", max);
+            break;
+        }
+        clients[count++] = con;
+    }
+    return count;
+}
+
+/*
+ * The band shared by all dropdowns on a workspace. Its height is derived from
+ * the global dropdown_height and its vertical position from the global
+ * dropdown_position: per-client overrides do not make sense for a shared band.
+ *
+ */
+static Rect dropdown_band(Con *ws) {
+    uint32_t height = (uint32_t)((double)ws->rect.height * config.dropdown_height);
+    if (height < 1) {
+        height = 1;
+    }
+    if (height > ws->rect.height) {
+        height = ws->rect.height;
+    }
+
+    Rect band = ws->rect;
+    band.height = height;
+    if (config.dropdown_position == DROPDOWN_POSITION_BOTTOM) {
+        band.y = ws->rect.y + ws->rect.height - height;
+    } else {
+        band.y = ws->rect.y;
+    }
+    return band;
+}
+
+/*
+ * Returns the slot of the index-th dropdown inside the band. Up to four
+ * dropdowns are tiled in one row; more use two rows.
+ *
+ */
+static Rect dropdown_slot(Rect band, int index, int count, int gap) {
+    int rows = 1;
+    int cols = count;
+    if (count > 4) {
+        rows = 2;
+        cols = (count + 1) / 2;
+    }
+
+    int cell_w = ((int)band.width - (cols - 1) * gap) / cols;
+    int cell_h = ((int)band.height - (rows - 1) * gap) / rows;
+    if (cell_w < 1) {
+        cell_w = 1;
+    }
+    if (cell_h < 1) {
+        cell_h = 1;
+    }
+
+    const int row = index / cols;
+    const int col = index % cols;
+    return (Rect){
+        .x = band.x + col * (cell_w + gap),
+        .y = band.y + row * (cell_h + gap),
+        .width = cell_w,
+        .height = cell_h,
+    };
+}
+
+/*
+ * Lays out all visible dropdowns on `ws` so that they do not overlap and
+ * animates them into their new slots. This only runs when a dropdown is shown
+ * or hidden; there is no per-frame work.
+ *
+ * With a single dropdown the per-client geometry is used; with multiple
+ * dropdowns they share the global band and are tiled as described above.
+ *
+ */
+static void dropdown_layout_visible(Con *ws, Con *newly_shown, bool newly_shown_was_hidden, Con *exclude) {
+    Con *clients[DROPDOWN_MAX_VISIBLE];
+    const int count = dropdown_collect_visible(ws, exclude, clients, DROPDOWN_MAX_VISIBLE);
+    if (count == 0) {
+        return;
+    }
+
+    const bool multiple = (count > 1);
+    Rect band = dropdown_band(ws);
+    int gap = calculate_effective_gaps(ws).inner;
+    if (gap < 0) {
+        gap = 0;
+    } else if (gap > 16) {
+        gap = 16;
+    }
+    const int band_position = config.dropdown_position == DROPDOWN_POSITION_BOTTOM
+                                  ? DROPDOWN_POSITION_BOTTOM
+                                  : DROPDOWN_POSITION_TOP;
+
+    for (int i = 0; i < count; i++) {
+        Con *client = clients[i];
+        Con *floating = con_inside_floating(client);
+        if (floating == NULL) {
+            continue;
+        }
+
+        const Rect old_client_rect = client->rect;
+        Rect target;
+        int position;
+        if (multiple) {
+            target = dropdown_slot(band, i, count, gap);
+            position = band_position;
+        } else {
+            target = dropdown_geometry(client, ws);
+            position = dropdown_client_position(client);
+        }
+
+        floating->rect = target;
+        floating_check_size(floating, false);
+        render_con(floating);
+
+        const Rect new_client_rect = client->rect;
+        if (rect_equals(new_client_rect, old_client_rect) && !client->anim.active) {
+            continue;
+        }
+
+        anim_rect from;
+        if (client == newly_shown && newly_shown_was_hidden) {
+            from = dropdown_offscreen(animation_rect_from_layout(new_client_rect), position);
+        } else if (client->anim.active) {
+            from = client->anim.cur;
+        } else {
+            from = animation_rect_from_layout(old_client_rect);
+        }
+
+        animation_begin(client, from, animation_rect_from_layout(new_client_rect),
+                        config.animation_dropdown_curve,
+                        config.animation_dropdown_duration / 1000.0, false);
+    }
+}
+
 /*
  * Shows the given window as a dropdown panel on the focused workspace.
  *
@@ -269,11 +434,9 @@ bool dropdown_show(Con *con, const char *spec) {
     }
 
     Con *current = con_get_workspace(floating);
-    const bool was_on_active_workspace = (current == active);
-    const Rect old_floating_rect = floating->rect;
-    const Rect old_client_rect = client->rect;
+    const bool was_hidden = (current == workspace_get("__i3_scratch"));
 
-    if (current == workspace_get("__i3_scratch")) {
+    if (was_hidden) {
         DLOG("dropdown_show: showing client %p from scratchpad\n", client);
         scratchpad_show(client);
     } else if (current != active) {
@@ -285,15 +448,6 @@ bool dropdown_show(Con *con, const char *spec) {
         con_activate(client);
     }
 
-    /* scratchpad_show() centers and resizes fresh scratchpad windows, so the
-     * dropdown geometry is applied afterwards. */
-    const Rect target_rect = dropdown_geometry(client, active);
-    const bool already_at_target =
-        was_on_active_workspace && rect_equals(old_floating_rect, target_rect);
-    floating->rect = target_rect;
-    floating_check_size(floating, false);
-    render_con(floating);
-
     /* Keep the dropdown geometry when the window is later shown through the
      * regular scratchpad commands. */
     floating->scratchpad_state = SCRATCHPAD_CHANGED;
@@ -301,7 +455,7 @@ bool dropdown_show(Con *con, const char *spec) {
     client->dropdown = true;
     client->anim.dropdown_hide_pending = false;
     /* Prevent x_push_node() from starting its generic open animation; the
-     * dropdown slide is configured below. */
+     * dropdown slide is configured in dropdown_layout_visible(). */
     client->anim.ever_pushed = true;
     if (client->window != NULL &&
         last_hidden_dropdown_window == client->window->id) {
@@ -309,25 +463,10 @@ bool dropdown_show(Con *con, const char *spec) {
         last_hidden_dropdown_window = XCB_NONE;
     }
 
-    if (!already_at_target) {
-        const anim_rect target = animation_rect_from_layout(client->rect);
-        anim_rect from;
-        if (client->anim.active) {
-            /* Reverse an in-flight show/hide from the currently visible
-             * position instead of jumping back to the screen edge. */
-            from = client->anim.cur;
-        } else if (was_on_active_workspace) {
-            /* The panel is already on this workspace; just move it to the
-             * dropdown geometry. */
-            from = animation_rect_from_layout(old_client_rect);
-        } else {
-            from = dropdown_offscreen(target, dropdown_client_position(client));
-        }
-
-        animation_begin(client, from, target,
-                        config.animation_dropdown_curve,
-                        config.animation_dropdown_duration / 1000.0, false);
-    }
+    /* Lay out all dropdowns on the workspace, including this one. A window
+     * which was hidden in the scratchpad slides in from the screen edge; the
+     * already visible dropdowns reflow into their new slots. */
+    dropdown_layout_visible(active, client, was_hidden, NULL);
 
     return true;
 }
@@ -344,9 +483,22 @@ bool dropdown_hide(Con *con) {
     }
 
     Con *floating = con_inside_floating(client);
-    if (floating == NULL || !dropdown_is_visible(client)) {
+    if (floating == NULL) {
+        DLOG("dropdown_hide: window is not floating\n");
+        return false;
+    }
+
+    Con *current = con_get_workspace(floating);
+    if (current == NULL || con_is_internal(current)) {
         DLOG("dropdown_hide: window is not a visible dropdown\n");
         return false;
+    }
+
+    Con *active = con_get_workspace(focused);
+    if (active != NULL && !con_is_internal(active) && current == active) {
+        /* Reflow the remaining dropdowns into their new slots before this one
+         * slides away; the hidden client is excluded from the layout. */
+        dropdown_layout_visible(active, NULL, false, client);
     }
 
     if (client->window != NULL) {

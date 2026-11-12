@@ -140,6 +140,19 @@ animation dropdown, <开关>, <时长 ms>, <曲线名>   # 默认 250ms / easeOu
   给出默认值；单次调用还可以用几何参数覆盖（见下）。
 - 隐藏时先播放滑出动画，动画结束后才移入 `__i3_scratch`；显示时从屏幕外滑到目标位置。
   `animations off` 或时长为 0 时立即显示/隐藏。
+- 多个下拉窗口同时显示时自动平铺，互不遮挡：同一工作区上最多 4 个时横向等分，
+  超过 4 个改为两行；它们共享同一条全局 band（高度取 `dropdown_height`，位置取
+  `dropdown_position`）。此时单客户端的 position/height/width/align 覆盖不生效。
+  显示或隐藏任意一个都会立即重排其余可见下拉；重新排布只发生在显示/隐藏时，
+  不会产生每帧开销。
+- 只有一个可见下拉时，继续使用下面列出的每客户端几何覆盖；新显示的下拉从各自
+  槽位的屏幕外滑入。
+- 隐藏的下拉窗口仍驻留在 `__i3_scratch`，进程保持存活（Yakuake 语义），不会被杀死。
+  用 `dropdown recall` 或 Alt+Tab 重新显示。
+- Alt+Tab（`switcher`）会列出隐藏的下拉窗口，标题前带 `[hidden]` 标记；选中并提交后
+  该窗口作为下拉面板重新显示，而不是仅仅聚焦 scratchpad 容器。普通 scratchpad
+  窗口（未标记为 dropdown）不会出现在 Alt+Tab 列表中。要真正结束隐藏的下拉进程，
+  请使用 `kill` 或先显示再正常关闭。
 - 命令（支持标准 criteria 前缀）：
 
 ```text

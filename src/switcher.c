@@ -33,6 +33,9 @@ struct switcher_candidate {
     /* Captured preview (NULL when the window could not be captured). */
     cairo_surface_t *image;
     int img_w, img_h;
+    /* Whether this candidate is a dropdown hidden in the scratchpad, see
+     * collect_hidden_dropdowns(). */
+    bool hidden_dropdown;
 };
 
 struct switcher_geometry {
@@ -97,6 +100,7 @@ static void collect_candidates(Con *con, Con *workspace) {
         c->image = NULL;
         c->img_w = 0;
         c->img_h = 0;
+        c->hidden_dropdown = false;
         return;
     }
 
@@ -109,6 +113,48 @@ static void collect_candidates(Con *con, Con *workspace) {
     Con *child;
     TAILQ_FOREACH (child, &(con->focus_head), focused) {
         collect_candidates(child, workspace);
+    }
+}
+
+/*
+ * Appends dropdowns which are hidden in an internal workspace (usually
+ * __i3_scratch) to the candidate list. They are kept alive there and can be
+ * brought back as dropdowns from the switcher. Only cons marked as dropdowns
+ * are included, so ordinary scratchpad windows stay out of Alt+Tab.
+ *
+ */
+static void collect_hidden_dropdowns(void) {
+    Con *con;
+    TAILQ_FOREACH (con, &all_cons, all_cons) {
+        if (sw.count >= SW_MAX_CANDIDATES) {
+            return;
+        }
+        if (con->type != CT_CON || con->window == NULL || !con->dropdown) {
+            continue;
+        }
+        Con *ws = con_get_workspace(con);
+        if (ws == NULL || !con_is_internal(ws)) {
+            continue;
+        }
+
+        bool already_listed = false;
+        for (int i = 0; i < sw.count; i++) {
+            if (sw.candidates[i].id == con->window->id) {
+                already_listed = true;
+                break;
+            }
+        }
+        if (already_listed) {
+            continue;
+        }
+
+        struct switcher_candidate *c = &(sw.candidates[sw.count++]);
+        c->con = con;
+        c->id = con->window->id;
+        c->image = NULL;
+        c->img_w = 0;
+        c->img_h = 0;
+        c->hidden_dropdown = true;
     }
 }
 
@@ -278,6 +324,24 @@ static const char *candidate_title(struct switcher_candidate *c) {
     return con->name != NULL ? con->name : "";
 }
 
+/*
+ * Builds the i3String used to draw a candidate title, prefixing hidden
+ * dropdowns with a marker so that they are recognizable in the panel.
+ *
+ */
+static i3String *candidate_title_i3(struct switcher_candidate *c) {
+    const char *title = candidate_title(c);
+    if (!c->hidden_dropdown) {
+        return i3string_from_utf8(title);
+    }
+
+    char *marked = NULL;
+    sasprintf(&marked, "[hidden] %s", title);
+    i3String *result = i3string_from_utf8(marked);
+    free(marked);
+    return result;
+}
+
 /******************************************************************************
  * Geometry & drawing
  ******************************************************************************/
@@ -347,7 +411,7 @@ static void draw_preview(struct switcher_candidate *c, int x, int y, int w, int 
         cairo_paint(cr);
     } else {
         /* Fallback: a large, dimmed window title inside the tile. */
-        i3String *title = i3string_from_utf8(candidate_title(c));
+        i3String *title = candidate_title_i3(c);
         draw_util_text(title, surface, config.client.unfocused.text,
                        config.client.unfocused.background,
                        x + logical_px(8), y + h / 2 - config.font.height / 2, w - logical_px(16));
@@ -418,7 +482,7 @@ static void draw_panel(void) {
     const struct Colortriple *colors = &(config.client.focused);
     const int bar_y = sw.geo.panel_h - sw.geo.title_h;
     draw_util_rectangle(surface, colors->border, 0, bar_y, sw.geo.panel_w, sw.geo.title_h);
-    i3String *sel_title = i3string_from_utf8(candidate_title(sel));
+    i3String *sel_title = candidate_title_i3(sel);
     const int text_w = predict_text_width(sel_title);
     int text_x = (sw.geo.panel_w - text_w) / 2;
     if (text_x < logical_px(8)) {
@@ -469,6 +533,7 @@ static void open_panel(int direction, bool sticky) {
         return;
     }
     collect_candidates(croot, workspace);
+    collect_hidden_dropdowns();
 
     if (sw.count == 0) {
         return;
@@ -649,6 +714,7 @@ void switcher_commit(void) {
     }
 
     const xcb_window_t id = sw.candidates[sw.index].id;
+    const bool hidden_dropdown = sw.candidates[sw.index].hidden_dropdown;
     switcher_close();
 
     /* Look the window up again: the container may have been closed while the
@@ -665,9 +731,18 @@ void switcher_commit(void) {
      * x_push_changes() to actually issue XSetInputFocus for the new window. */
     focused_id = XCB_NONE;
 
-    /* con_activate() is con_focus() plus raising the window, which matters for
-     * floating candidates. */
-    con_activate(con);
+    Con *con_ws = con_get_workspace(con);
+    if (hidden_dropdown ||
+        (con->dropdown && con_ws != NULL && con_is_internal(con_ws))) {
+        /* Hidden dropdowns have to be shown as dropdowns again: this moves
+         * them out of the scratchpad, marks them and lays out all visible
+         * dropdowns on the workspace. */
+        dropdown_show(con, NULL);
+    } else {
+        /* con_activate() is con_focus() plus raising the window, which matters
+         * for floating candidates. */
+        con_activate(con);
+    }
     tree_render();
 }
 

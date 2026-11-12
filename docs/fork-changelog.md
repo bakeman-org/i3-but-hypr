@@ -109,6 +109,14 @@ Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scra
   （`animation.c` 的 `dropdown_hide_pending`）才移入 `__i3_scratch`，进程保持存活；
   显示时从屏幕外滑回目标矩形。`animations off` 或时长为 0 时立即生效。
 - 隐藏完成后由 `con_move_to_workspace` 恢复焦点到原来的可见窗口。
+- 多窗口下拉：同一工作区上多个可见 dropdown 会自动平铺（最多 4 个横向等分，
+  超过 4 个改为两行），显示/隐藏任意一个时重排其余窗口，互不重叠；多个窗口
+  共享由全局 `dropdown_height` / `dropdown_position` 决定的 band，只有单个可见
+  下拉时才使用每客户端的几何覆盖。重排只在显示/隐藏时执行。
+- Alt+Tab 集成：`switcher` 在普通候选之后追加隐藏的下拉窗口（位于 `__i3_scratch`
+  且带 `dropdown` 标记），标题显示为 `[hidden] ...`；提交隐藏候选时调用
+  `dropdown_show()` 将其作为下拉面板重新显示并重排，而不是仅聚焦 scratchpad
+  容器。普通 scratchpad 窗口不会出现在列表中；隐藏进程始终存活。
 - IPC `get_tree` 为每个容器输出 `dropdown` 布尔字段。
 - 限制：`dropdown` 标记不参与 restart/load_layout 持久化，重启后窗口退化为普通
   scratchpad 窗口。
