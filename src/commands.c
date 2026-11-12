@@ -26,19 +26,23 @@
             y(map_close);                   \
         }                                   \
     } while (0)
-#define yerror(format, ...)                             \
-    do {                                                \
-        if (cmd_output->json_gen != NULL) {             \
-            char *message;                              \
-            sasprintf(&message, format, ##__VA_ARGS__); \
-            y(map_open);                                \
-            ystr("success");                            \
-            y(bool, false);                             \
-            ystr("error");                              \
-            ystr(message);                              \
-            y(map_close);                               \
-            free(message);                              \
-        }                                               \
+/* NOTE: the local must not be called "message": cmd_layoutmsg() (and possibly
+ * other commands) have a parameter of that name, which would be shadowed and
+ * an uninitialized pointer would be read by sasprintf(), crashing i3 on every
+ * error path that passes such a variable. */
+#define yerror(format, ...)                                   \
+    do {                                                      \
+        if (cmd_output->json_gen != NULL) {                   \
+            char *error_message;                              \
+            sasprintf(&error_message, format, ##__VA_ARGS__); \
+            y(map_open);                                      \
+            ystr("success");                                  \
+            y(bool, false);                                   \
+            ystr("error");                                    \
+            ystr(error_message);                              \
+            y(map_close);                                     \
+            free(error_message);                              \
+        }                                                     \
     } while (0)
 
 /** If an error occurred during parsing of the criteria, we want to exit instead

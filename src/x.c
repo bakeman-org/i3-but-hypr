@@ -161,9 +161,16 @@ void x_con_init(Con *con) {
     /* We explicitly set a background color and border color (even though we
      * don’t even have a border) because the X11 server requires us to when
      * using 32 bit color depths, see
-     * https://stackoverflow.com/questions/3645632 */
+     * https://stackoverflow.com/questions/3645632
+     *
+     * The background is the theme’s window background instead of plain black:
+     * container frames which are not painted themselves (workspace, output and
+     * split containers) and the areas a frame exposes while it is being
+     * resized or moved are filled with this color by the X server. Without
+     * this, scrolling layouts which do not cover the whole screen (scroller,
+     * structs, gaps) show black strips. */
     mask |= XCB_CW_BACK_PIXEL;
-    values[0] = root_screen->black_pixel;
+    values[0] = config.client.background.colorpixel;
 
     mask |= XCB_CW_BORDER_PIXEL;
     values[1] = root_screen->black_pixel;
@@ -202,6 +209,45 @@ void x_con_init(Con *con) {
     CIRCLEQ_INSERT_HEAD(&old_state_head, state, old_state);
     TAILQ_INSERT_TAIL(&initial_mapping_head, state, initial_mapping_order);
     DLOG("adding new state for window id 0x%08x\n", state->id);
+}
+
+/*
+ * Applies the configured window background color to the given container and
+ * all of its children.
+ *
+ */
+static void update_frame_background(Con *con) {
+    if (con->frame.id != XCB_NONE) {
+        xcb_change_window_attributes(conn, con->frame.id, XCB_CW_BACK_PIXEL,
+                                     (uint32_t[]){config.client.background.colorpixel});
+
+        /* Frames without a pixmap show the background color directly, so they
+         * have to be repainted when the color changed. This also wipes any
+         * stale pixels left over from previously moved children. */
+        if (con->frame_buffer.id == XCB_NONE) {
+            xcb_clear_area(conn, false, con->frame.id, 0, 0, 0, 0);
+        }
+    }
+
+    Con *child;
+    TAILQ_FOREACH (child, &(con->nodes_head), nodes) {
+        update_frame_background(child);
+    }
+    TAILQ_FOREACH (child, &(con->floating_head), floating_windows) {
+        update_frame_background(child);
+    }
+}
+
+/*
+ * Re-applies the window background color to every frame. Called after the
+ * configuration has been reloaded, so that a changed client.background color
+ * (and the strips of layouts which do not cover the whole screen) use it.
+ *
+ */
+void x_update_frame_backgrounds(void) {
+    if (croot != NULL) {
+        update_frame_background(croot);
+    }
 }
 
 /*
@@ -1144,6 +1190,27 @@ static void set_shape_state(Con *con, bool need_reshape) {
 }
 
 /*
+ * Returns whether the container lies completely outside of the visible area of
+ * its output. Only scrolling layouts can produce such containers: their
+ * columns may be scrolled far off-screen.
+ *
+ */
+static bool con_is_offscreen(Con *con) {
+    Con *output = con_get_output(con);
+    if (output == NULL) {
+        return false;
+    }
+
+    const Rect *r = &(con->rect);
+    const Rect *o = &(output->rect);
+
+    return (r->x + (int32_t)r->width <= o->x) ||
+           (r->x >= o->x + (int32_t)o->width) ||
+           (r->y + (int32_t)r->height <= o->y) ||
+           (r->y >= o->y + (int32_t)o->height);
+}
+
+/*
  * This function pushes the properties of each node of the layout tree to
  * X11 if they have changed (like the map state, position of the window, …).
  * It recursively traverses all children of the given node.
@@ -1272,28 +1339,46 @@ void x_push_node(Con *con) {
         is_pixmap_needed = false;
     }
 
+    /* Columns which are scrolled completely out of view can never be seen, so
+     * their decoration pixmap is not allocated. A full-height column needs
+     * roughly width * height * 4 bytes (about 3.5 MB for a 1116x781 column),
+     * which adds up quickly on workspaces with many columns. Scrolling the
+     * column back into view creates the pixmap again in the block below. */
+    if (is_pixmap_needed && !con->anim.active && con->parent != NULL &&
+        con->parent->layout == L_SCROLLER && con_is_offscreen(con)) {
+        is_pixmap_needed = false;
+    }
+
+    /* Release a pixmap which is not needed anymore: either the container lost
+     * its border/titlebar, or it was scrolled out of view. */
+    if (!is_pixmap_needed && con->frame_buffer.id != XCB_NONE) {
+        draw_util_surface_free(conn, &(con->frame_buffer));
+        xcb_free_pixmap(conn, con->frame_buffer.id);
+        con->frame_buffer.id = XCB_NONE;
+    }
+
     bool fake_notify = false;
     /* Set new position if rect changed (and if height > 0) or if the pixmap
      * needs to be recreated */
     if ((is_pixmap_needed && con->frame_buffer.id == XCB_NONE) || (!rect_equals(state->rect, rect) &&
-                                                                   rect.height > 0)) {
+                                                                  rect.height > 0)) {
         /* We first create the new pixmap, then render to it, set it as the
          * background and only afterwards change the window size. This reduces
          * flickering. */
 
-        bool has_rect_changed = (state->rect.x != rect.x || state->rect.y != rect.y ||
-                                 state->rect.width != rect.width || state->rect.height != rect.height);
 
-        /* Check if the container has an unneeded pixmap left over from
-         * previously having a border or titlebar. */
-        if (!is_pixmap_needed && con->frame_buffer.id != XCB_NONE) {
-            draw_util_surface_free(conn, &(con->frame_buffer));
-            xcb_free_pixmap(conn, con->frame_buffer.id);
-            con->frame_buffer.id = XCB_NONE;
-        }
 
-        if (is_pixmap_needed && (has_rect_changed || con->frame_buffer.id == XCB_NONE) &&
-            rect.width > 0 && rect.height > 0) {
+        /* Size the pixmap after the layout rect, not the (possibly animated)
+         * rect: during an animation con->rect is constant, so the pixmap and
+         * its cairo surface are created exactly once per layout change instead
+         * of once per frame. It also guarantees that the CopyArea below, which
+         * copies con->rect-sized regions, never reads past the end of the
+         * pixmap (which used to leave black garbage in the freshly allocated
+         * area). */
+        const bool pixmap_ok = con->frame_buffer.id != XCB_NONE &&
+                               con->frame_buffer.width == (int)con->rect.width &&
+                               con->frame_buffer.height == (int)con->rect.height;
+        if (is_pixmap_needed && !pixmap_ok && con->rect.width > 0 && con->rect.height > 0) {
             if (con->frame_buffer.id == XCB_NONE) {
                 con->frame_buffer.id = xcb_generate_id(conn);
             } else {
@@ -1310,8 +1395,8 @@ void x_push_node(Con *con) {
              * containers never enter this path (see the condition above):
              * X requires dimensions >= 1, so the clamps below are only a
              * defensive measure. */
-            int width = MAX((int32_t)rect.width, 1);
-            int height = MAX((int32_t)rect.height, 1);
+            int width = MAX((int32_t)con->rect.width, 1);
+            int height = MAX((int32_t)con->rect.height, 1);
 
             DLOG("creating %d x %d pixmap for con %p (con->frame_buffer.id = (pixmap_t)0x%08x) (con->frame.id (drawable_t)0x%08x)\n", width, height, con, con->frame_buffer.id, con->frame.id);
             xcb_create_pixmap(conn, win_depth, con->frame_buffer.id, con->frame.id, width, height);
@@ -1326,7 +1411,6 @@ void x_push_node(Con *con) {
              * is not a concern for us. */
             xcb_change_gc(conn, con->frame_buffer.gc, XCB_GC_GRAPHICS_EXPOSURES, (uint32_t[]){0});
 
-            draw_util_surface_set_size(&(con->frame), width, height);
             con->pixmap_recreated = true;
             /* The freshly created buffer only holds black pixels until the
              * decoration render below repopulates it. */
@@ -1354,6 +1438,10 @@ void x_push_node(Con *con) {
         xcb_flush(conn);
         xcb_set_window_rect(conn, con->frame.id, rect);
         if (con->frame_buffer.id != XCB_NONE) {
+            /* Keep the frame's cairo surface metadata in sync with the actual
+             * window size: during an animation the window is resized every
+             * frame while the pixmap keeps the layout size. */
+            draw_util_surface_set_size(&(con->frame), MAX((int32_t)rect.width, 1), MAX((int32_t)rect.height, 1));
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
             con->frame_dirty = false;
         }
@@ -1365,15 +1453,13 @@ void x_push_node(Con *con) {
 
     /* ditto, but for child windows */
     if (con->window != NULL) {
-        Rect window_rect = con->window_rect;
-        if (con->anim.active) {
-            /* The client window is positioned relative to its frame, so only
-             * size changes need to be propagated. */
-            const int32_t dw = con->anim.cur.width - (int32_t)con->rect.width;
-            const int32_t dh = con->anim.cur.height - (int32_t)con->rect.height;
-            window_rect.width = (uint32_t)((int32_t)con->window_rect.width + dw);
-            window_rect.height = (uint32_t)((int32_t)con->window_rect.height + dh);
-        }
+        /* Always use the final window_rect, even while the frame is being
+         * animated: X clips subwindows to their parent, so the client is
+         * simply cropped while the frame catches up. Resizing the client
+         * window every frame forced clients to redraw constantly, which
+         * caused flickering and black (not yet redrawn) areas during
+         * scroller proportion changes. */
+        const Rect window_rect = con->window_rect;
         if (!rect_equals(state->window_rect, window_rect)) {
             DLOG("setting window rect (%d, %d, %d, %d)\n",
                  window_rect.x, window_rect.y, window_rect.width, window_rect.height);

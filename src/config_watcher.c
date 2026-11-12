@@ -114,6 +114,11 @@ void config_watcher_rearm(void) {
 
     clear_watches();
 
+    if (!config.hot_reload) {
+        DLOG("config hot reload disabled by configuration\n");
+        return;
+    }
+
     if (current_configpath != NULL) {
         watch_file(current_configpath);
     }
@@ -273,5 +278,5 @@ void config_watcher_init(void) {
 
     ev_io_init(&inotify_watcher, inotify_cb, inotify_fd, EV_READ);
     ev_io_start(main_loop, &inotify_watcher);
-    LOG("config hot reload active\n");
+    LOG("config hot reload active (%s)\n", config.hot_reload ? "on" : "off");
 }

@@ -541,6 +541,14 @@ CFGFUN(show_marks, const char *value) {
     config.show_marks = boolstr(value);
 }
 
+CFGFUN(hot_reload, const char *value) {
+    config.hot_reload = boolstr(value);
+    /* Apply the new setting right away when hot reload is toggled via a
+     * configuration reload; during the initial load the watcher is not
+     * running yet and config_watcher_init() picks this up. */
+    config_watcher_rearm();
+}
+
 static char *current_workspace = NULL;
 
 CFGFUN(workspace, const char *workspace, const char *output) {
@@ -1345,4 +1353,8 @@ CFGFUN(scroller_default_proportion_single, const char *value) {
     }
 
     config.scroller_default_proportion_single = proportion;
+}
+
+CFGFUN(scroller_autofit, const char *value) {
+    config.scroller_autofit = boolstr(value);
 }

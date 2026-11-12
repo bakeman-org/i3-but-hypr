@@ -606,7 +606,36 @@ static Rect *precalculate_layout_rects(Con *con, render_params *p) {
             widths[idx++] = width;
         }
 
+        int total_width = 0;
+        for (int i = 0; i < count; i++) {
+            total_width += widths[i];
+        }
+
+        /* Autofit: when the columns are narrower than the visible area, spread
+         * them out until the area is completely covered. Otherwise the
+         * unpainted parent window (which is what lies behind the columns)
+         * shows through at the sides as a black strip. */
         const bool single = (count == 1);
+        if (config.scroller_autofit &&
+            total_width > 0 && total_width < (int)p->rect.width &&
+            !(single && !config.scroller_proportion_single)) {
+            const int target = (int)p->rect.width;
+            int assigned = 0;
+            for (int i = 0; i < count; i++) {
+                widths[i] = (int)((int64_t)widths[i] * target / total_width);
+                if (widths[i] < 1) {
+                    widths[i] = 1;
+                }
+                assigned += widths[i];
+            }
+            /* Hand out the pixels lost to rounding, starting at the last
+             * column so that the focused column keeps its rounded width. */
+            for (int i = count - 1; assigned < target; i = (i == 0 ? count - 1 : i - 1)) {
+                widths[i]++;
+                assigned++;
+            }
+        }
+
         const bool at_edge = (focus_index == 0 || focus_index == count - 1);
 
         /* Decide whether the focused column is centered or anchored to the
@@ -623,6 +652,11 @@ static Rect *precalculate_layout_rects(Con *con, render_params *p) {
             center = config.scroller_prefer_center;
         }
 
+        /* With autofit the anchored column sits flush against the screen edge,
+         * so the uncovered strip which scroller_structs would leave behind is
+         * not visible. */
+        const int edge_offset = config.scroller_autofit ? 0 : structs;
+
         int focus_x;
         if (single && !config.scroller_proportion_single) {
             /* A single window fills the whole area, like in every other i3
@@ -634,9 +668,9 @@ static Rect *precalculate_layout_rects(Con *con, render_params *p) {
         } else if (focus_index * 2 < count) {
             /* Anchor the focused column to the left edge and let the
              * following columns run off the right edge. */
-            focus_x = (int)p->rect.x + structs;
+            focus_x = (int)p->rect.x + edge_offset;
         } else {
-            focus_x = (int)p->rect.x + (int)p->rect.width - structs - widths[focus_index];
+            focus_x = (int)p->rect.x + (int)p->rect.width - edge_offset - widths[focus_index];
         }
 
         positions[focus_index] = focus_x;

@@ -227,6 +227,10 @@ struct Config {
      * decoration. Marks starting with a "_" will be ignored either way. */
     bool show_marks;
 
+    /** Whether configuration files are watched and automatically reloaded
+     * when they change on disk ("hot_reload on|off", default: on). */
+    bool hot_reload;
+
     /** Title alignment options. */
     enum {
         ALIGN_LEFT,
@@ -366,6 +370,12 @@ struct Config {
     bool scroller_proportion_single;
     /* Proportion used for the single-window case. */
     double scroller_default_proportion_single;
+    /* Automatically fit the columns into the visible area: columns are never
+     * wider than the screen and, when their combined width falls short of it,
+     * they are spread out until the area is completely covered. The focused
+     * column is anchored flush to the screen edge it is scrolled to, so no
+     * unpainted strips remain at the sides. */
+    bool scroller_autofit;
 
     /* Opacity applied to windows (requires a compositing manager to have a
      * visible effect). active_opacity is used for the focused window,

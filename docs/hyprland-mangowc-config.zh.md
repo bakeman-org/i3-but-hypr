@@ -150,7 +150,12 @@ scroller_prefer_center yes|no             # 允许时优先居中，默认 no
 scroller_prefer_overspread yes|no         # 焦点列在边缘时锚定该边缘，默认 yes
 scroller_ignore_proportion_single yes|no  # 单列工作区忽略比例设置，默认 no
 scroller_default_proportion_single <0.1-1.0>  # 单列时的占比，默认 1.0
+scroller_autofit yes|no                   # 自动铺满可视区，默认 yes
 ```
+
+`scroller_autofit`（默认开启）保证可视区不留黑边：列宽按比例放大铺满可视区
+（比例关系不变）、列永远不会比屏幕更宽、焦点列锚定屏幕边缘时贴边
+（`scroller_structs` 不再在屏幕边缘留出底色条）。
 
 焦点列定位优先级：`scroller_focus_center` > 单列 > `scroller_prefer_overspread`
 （锚定最近边缘）> `scroller_prefer_center`；均未命中时锚定最近边缘。

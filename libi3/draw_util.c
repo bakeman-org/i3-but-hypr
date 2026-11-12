@@ -151,6 +151,9 @@ void draw_util_surface_free(xcb_connection_t *conn, surface_t *surface) {
  *
  */
 void draw_util_surface_set_size(surface_t *surface, int width, int height) {
+    if (!surface_initialized(surface)) {
+        return;
+    }
     surface->width = width;
     surface->height = height;
     cairo_xcb_surface_set_size(surface->surface, width, height);
@@ -396,10 +399,18 @@ void draw_util_rounded_top_rectangle(surface_t *surface, color_t color, double x
     const double max_radius = MIN(w, h) / 2.0;
     if (radius > 0.0 && radius <= max_radius && h > radius) {
         const double right = x + w;
+        const double bottom = y + h;
 
+        /* Both top corners are rounded, the sides continue straight down to
+         * the bottom edge. The explicit line_to()s are essential: without
+         * them cairo_close_path() would connect the two arc end points
+         * directly, leaving the area between y + radius and y + h unpainted
+         * (which showed up as a lighter band below the title bar). */
         cairo_new_sub_path(surface->cr);
         cairo_arc(surface->cr, x + radius, y + radius, radius, M_PI, 1.5 * M_PI);
         cairo_arc(surface->cr, right - radius, y + radius, radius, 1.5 * M_PI, 2.0 * M_PI);
+        cairo_line_to(surface->cr, right, bottom);
+        cairo_line_to(surface->cr, x, bottom);
         cairo_close_path(surface->cr);
         cairo_fill(surface->cr);
     } else {

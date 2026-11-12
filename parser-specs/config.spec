@@ -54,6 +54,7 @@ state INITIAL:
   'focus_on_window_activation'             -> FOCUS_ON_WINDOW_ACTIVATION
   'title_align'                            -> TITLE_ALIGN
   'show_marks'                             -> SHOW_MARKS
+  'hot_reload'                             -> HOT_RELOAD
   'workspace'                              -> WORKSPACE
   'animations'                             -> ANIMATIONS
   'animation'                              -> ANIMATION
@@ -80,6 +81,7 @@ state INITIAL:
   'scroller_prefer_overspread'             -> SCROLLER_PREFER_OVERSPREAD
   'scroller_ignore_proportion_single'      -> SCROLLER_IGNORE_PROPORTION_SINGLE
   'scroller_default_proportion_single'     -> SCROLLER_DEFAULT_PROPORTION_SINGLE
+  'scroller_autofit'                       -> SCROLLER_AUTOFIT
   'ipc_socket', 'ipc-socket'               -> IPC_SOCKET
   'ipc_kill_timeout'                       -> IPC_KILL_TIMEOUT
   'restart_state'                          -> RESTART_STATE
@@ -356,6 +358,11 @@ state TITLE_ALIGN:
 state SHOW_MARKS:
   value = word
       -> call cfg_show_marks($value)
+
+# hot_reload <on|off>
+state HOT_RELOAD:
+  value = word
+      -> call cfg_hot_reload($value)
 
 state FORCE_DISPLAY_URGENCY_HINT_MS:
   'ms'
@@ -918,6 +925,11 @@ state SCROLLER_IGNORE_PROPORTION_SINGLE:
 state SCROLLER_DEFAULT_PROPORTION_SINGLE:
   value = string
       -> call cfg_scroller_default_proportion_single($value)
+
+# scroller_autofit yes|no
+state SCROLLER_AUTOFIT:
+  value = string
+      -> call cfg_scroller_autofit($value)
 
 # client.focused_gradient "#color #color [angle]"
 state CLIENT_GRADIENT_FOCUSED:

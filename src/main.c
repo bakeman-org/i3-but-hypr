@@ -279,13 +279,31 @@ static int parse_restart_fd(void) {
  * every keybinding is handled by i3 itself without interference from the
  * host window manager / compositor (e.g. testing under Hyprland). */
 static int nest_display = 99;
+/* Whether the display number was given explicitly with --nest=N; otherwise a
+ * free display is picked automatically. */
+static bool nest_display_explicit = false;
 
 extern char **environ;
 
-static bool nest_display_in_use(void) {
+static bool nest_display_in_use(int display) {
     char socketfile[64];
-    snprintf(socketfile, sizeof(socketfile), "/tmp/.X11-unix/X%d", nest_display);
-    return access(socketfile, F_OK) == 0;
+    char lockfile[64];
+    snprintf(socketfile, sizeof(socketfile), "/tmp/.X11-unix/X%d", display);
+    snprintf(lockfile, sizeof(lockfile), "/tmp/.X%d-lock", display);
+    return access(socketfile, F_OK) == 0 || access(lockfile, F_OK) == 0;
+}
+
+/*
+ * Picks the first free display number, starting at 99 and counting downwards.
+ *
+ */
+static int nest_find_free_display(void) {
+    for (int display = 99; display > 0; display--) {
+        if (!nest_display_in_use(display)) {
+            return display;
+        }
+    }
+    errx(EXIT_FAILURE, "nest mode: no free X display found");
 }
 
 /* Work around a broken hand-installed libxkbcommon in
@@ -316,12 +334,17 @@ static void nest_ensure_system_libs(void) {
 static void nest_run(void) {
     char sockfile[64];
     char disparg[16];
+
+    if (!nest_display_explicit) {
+        nest_display = nest_find_free_display();
+    }
+
     snprintf(sockfile, sizeof(sockfile), "/tmp/.X11-unix/X%d", nest_display);
     snprintf(disparg, sizeof(disparg), ":%d", nest_display);
 
-    if (nest_display_in_use()) {
-        errx(EXIT_FAILURE, "nest mode: display :%d is already in use (%s exists)",
-             nest_display, sockfile);
+    if (nest_display_in_use(nest_display)) {
+        errx(EXIT_FAILURE, "nest mode: display :%d is already in use (pass --nest=N to choose another display)",
+             nest_display);
     }
 
     nest_ensure_system_libs();
@@ -549,6 +572,7 @@ int main(int argc, char *argv[]) {
                         if (nest_display <= 0) {
                             errx(EXIT_FAILURE, "Invalid --nest display number: %s", optarg);
                         }
+                        nest_display_explicit = true;
                     }
                     break;
                 }

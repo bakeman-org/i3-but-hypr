@@ -51,6 +51,9 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 - `titlebar normal|none|toggle`：运行时显示/隐藏匹配窗口的标题栏（可按窗口绑定按键）。
   浮动窗口默认保留标题栏：应用的 `_MOTIF_WM_HINTS`（Chromium/Electron/GTK 等 CSD 客户端
   会用它请求“无边框”）在浮动状态下被忽略，见 `src/floating.c`、`src/handlers.c`。
+- `hot_reload on|off`（默认 on）：自动监视主配置及 `include` 的文件，改动后
+  0.2s 防抖、先子进程校验再应用（见 `src/config_watcher.c`）。默认开启时可以
+  不再绑定 `$mod+Shift+c reload`；`restart` 仍用于换二进制等场景。
 - `cyclenext` / `cycleprev`：循环聚焦。
 - `zoom`、`swapdir`：主区交换/方向交换。
 - `layoutmsg <msg>`：`togglesplit`、`proportion ±delta`、`setproportion <x>`
@@ -137,6 +140,12 @@ frame 窗口；`x_deco_recurse` 的父容器拷贝同样按脏标记门控。
 帧定时器原为固定 1/60 间隔的重复定时器，渲染耗时会整体顺延后续帧。
 改为每帧结束时按"剩余预算"设置 repeat（`1/60 - 本帧渲染耗时`），
 保持 60 Hz 墙钟节拍，动画更均匀；无可动画时照旧停表零轮询。
+
+### 6. scroller 黑块修复、autofit 与越界列 pixmap 回收
+
+frame 背景像素改用 `client.background` 主题色，消除黑块与残影；
+`scroller_autofit`（默认 yes）：列窄于屏幕时按比例铺满、列宽不超过屏幕、贴边锚定；
+完全滚出可视区的列不再分配装饰 pixmap（单列约 3.5 MB），滚回来时自动重建。
 
 ## 三、性能画像与内存
 

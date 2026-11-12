@@ -197,6 +197,8 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     } while (0)
 
     config.client.background = draw_util_hex_to_color("#11111b");
+    /* Watch configuration files and reload automatically by default. */
+    config.hot_reload = true;
     INIT_COLOR(config.client.focused, "#181825", "#181825", "#cdd6f4", "#f9e2af");
     INIT_COLOR(config.client.focused_inactive, "#181825", "#181825", "#a6adc8", "#313244");
     INIT_COLOR(config.client.unfocused, "#11111b", "#11111b", "#6c7086", "#313244");
@@ -268,6 +270,7 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     config.scroller_prefer_overspread = true;
     config.scroller_proportion_single = false;
     config.scroller_default_proportion_single = 1.0;
+    config.scroller_autofit = true;
     config.active_opacity = 1.0;
     config.inactive_opacity = 1.0;
     config.dim_inactive = false;
@@ -349,6 +352,7 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         grab_all_keys(conn);
         regrab_all_buttons(conn);
         gaps_reapply_workspace_assignments();
+        x_update_frame_backgrounds();
 
         /* Redraw the currently visible decorations on reload, so that the
          * possibly new drawing parameters changed. */

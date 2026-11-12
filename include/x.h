@@ -36,6 +36,13 @@ void x_move_win(Con *src, Con *dest);
 void x_reparent_child(Con *con, Con *old);
 
 /**
+ * Re-applies the configured window background color to every frame. Called
+ * after the configuration has been reloaded.
+ *
+ */
+void x_update_frame_backgrounds(void);
+
+/**
  * Re-initializes the associated X window state for this container. You have
  * to call this when you assign a client to an empty container to ensure that
  * its state gets updated correctly.
