@@ -1,0 +1,117 @@
+name: Package (deb/rpm)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, next, main, i3-but-hypr]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NFPM_VERSION: "2.38.0"
+  PKG_NAME: i3-but-hypr
+
+jobs:
+  build-deb:
+    name: build deb (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build build-essential pkg-config git ca-certificates curl \
+            jq gettext asciidoc xmlto docbook-xml libpod-simple-perl \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-util0-dev \
+            libxcb-cursor-dev libxcb-keysyms1-dev libxcb-icccm4-dev \
+            libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shape0-dev \
+            libxcb-xrm-dev libxcb-xkb-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libstartup-notification0-dev \
+            libpango1.0-dev libcairo2-dev libyajl-dev libev-dev \
+            liblua5.4-dev libpcre2-dev
+
+      - name: Build
+        run: |
+          meson setup build --prefix=/usr --buildtype=release -Dmans=true
+          ninja -C build
+          meson test -C build i3ext_scan
+          DESTDIR="$PWD/pkg" ninja -C build install
+
+      - name: Install nfpm
+        run: |
+          curl -fsSL \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            -o /tmp/nfpm.tgz
+          sudo tar -xzf /tmp/nfpm.tgz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Package deb
+        env:
+          ARCH: amd64
+        run: |
+          VERSION=$(meson introspect build --projectinfo | jq -r .version)
+          case "$VERSION" in
+            *.*.*) ;;
+            *) VERSION="${VERSION}.0" ;;
+          esac
+          export VERSION RELEASE="${GITHUB_RUN_NUMBER}"
+          mkdir -p dist
+          envsubst '${VERSION} ${RELEASE} ${ARCH}' \
+            < .github/packaging/nfpm.yaml > /tmp/nfpm.yaml
+          nfpm package --config /tmp/nfpm.yaml --packager deb --target dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  build-rpm:
+    name: build rpm (Fedora container)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build RPM in Fedora
+        env:
+          NFPM_VERSION: ${{ env.NFPM_VERSION }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -e NFPM_VERSION -e GITHUB_RUN_NUMBER \
+            fedora:latest \
+            bash /src/.github/scripts/build-rpm.sh
+          sudo chown -R "$(id -u):$(id -g)" pkg-rpm build-rpm dist 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  release:
+    name: publish release assets
+    needs: [build-deb, build-rpm]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/*.rpm
+          generate_release_notes: true

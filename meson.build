@@ -324,7 +324,13 @@ cairo_dep = dependency('cairo', version: '>=1.14.4', method: 'pkg-config')
 pangocairo_dep = dependency('pangocairo', method: 'pkg-config')
 glib_dep = dependency('glib-2.0', method: 'pkg-config')
 gobject_dep = dependency('gobject-2.0', method: 'pkg-config')
-lua_dep = dependency('lua5.4', version: '>=5.4', method: 'pkg-config')
+lua_dep = dependency('lua5.4', version: '>=5.4', method: 'pkg-config', required: false)
+if not lua_dep.found()
+  lua_dep = dependency('lua-5.4', version: '>=5.4', method: 'pkg-config', required: false)
+endif
+if not lua_dep.found()
+  lua_dep = dependency('lua', version: '>=5.4', method: 'pkg-config', required: true)
+endif
 
 ev_dep = cc.find_library('ev')
 
