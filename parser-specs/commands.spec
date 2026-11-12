@@ -51,6 +51,7 @@ state INITIAL:
   'rename' -> RENAME
   'nop' -> NOP
   'scratchpad' -> SCRATCHPAD
+  'dropdown' -> DROPDOWN
   'swap' -> SWAP
   'title_format' -> TITLE_FORMAT
   'title_window_icon' -> TITLE_WINDOW_ICON
@@ -508,6 +509,17 @@ state NOP:
 state SCRATCHPAD:
   'show'
       -> call cmd_scratchpad_show()
+
+# dropdown toggle|show|hide|recall [<position>,<height>,<width>,<align>]
+state DROPDOWN:
+  action = 'toggle', 'show', 'hide', 'recall'
+      -> DROPDOWN_SPEC
+
+state DROPDOWN_SPEC:
+  end
+      -> call cmd_dropdown($action, NULL)
+  spec = string
+      -> call cmd_dropdown($action, $spec)
 
 # swap [container] [with] id <window>
 # swap [container] [with] con_id <con_id>

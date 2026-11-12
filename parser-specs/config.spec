@@ -58,6 +58,8 @@ state INITIAL:
   'workspace'                              -> WORKSPACE
   'animations'                             -> ANIMATIONS
   'animation'                              -> ANIMATION
+  'dropdown_height'                        -> DROPDOWN_HEIGHT
+  'dropdown_position'                      -> DROPDOWN_POSITION
   'bezier'                                 -> BEZIER
   'master_ratio'                           -> MASTER_RATIO
   'active_opacity'                         -> ACTIVE_OPACITY
@@ -814,10 +816,20 @@ state ANIMATIONS:
   value = '0', 'no', 'false', 'off', 'disable', 'inactive'
       -> call cfg_animations($value)
 
-# animation <windows|workspaces>, <enabled>, <duration in ms>, <curve>
+# animation <windows|workspaces|dropdown>, <enabled>, <duration in ms>, <curve>
 state ANIMATION:
   spec = string
       -> call cfg_animation($spec)
+
+# dropdown_height <0.1 - 1.0>
+state DROPDOWN_HEIGHT:
+  value = string
+      -> call cfg_dropdown_height($value)
+
+# dropdown_position top|bottom
+state DROPDOWN_POSITION:
+  value = 'top', 'bottom'
+      -> call cfg_dropdown_position($value)
 
 # bezier <name>, <x1>, <y1>, <x2>, <y2>
 state BEZIER:

@@ -410,6 +410,9 @@ void dump_node(yajl_gen gen, Con *con, bool inplace_restart) {
             break;
     }
 
+    ystr("dropdown");
+    y(bool, con->dropdown);
+
     ystr("percent");
     if (con->percent == 0.0) {
         y(null);

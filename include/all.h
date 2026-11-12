@@ -71,6 +71,7 @@
 #include "regex.h"
 #include "startup.h"
 #include "scratchpad.h"
+#include "dropdown.h"
 #include "commands.h"
 #include "commands_parser.h"
 #include "bindings.h"

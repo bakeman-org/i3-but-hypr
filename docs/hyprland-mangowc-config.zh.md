@@ -109,11 +109,12 @@ animation <类型>, <开关>, <时长 ms>, <曲线名>
 | `windowsOut` | `windowclose` | 窗口关闭动画 |
 | `fadeIn` | `fade` / `fadeOut` | 焦点切换淡入淡出 |
 | `workspaces` | — | 工作区切换动画 |
+| `dropdown` | — | 下拉窗口滑入/滑出动画 |
 | `global` | — | 一次性设置以上全部 |
 
 - 字段均可省略：开关默认 `on`，时长缺省为 `0`（沿用对应默认），曲线缺省沿用原值。
 - 默认值：总开关 `animations on`，windows 180ms、open 220ms、close 150ms、
-  workspaces 300ms，曲线 `easeOutQuint`。
+  workspaces 300ms、dropdown 250ms，曲线 `easeOutQuint`。
 
 示例：
 
@@ -123,6 +124,69 @@ bezier myQuint, 0.23, 1.0, 0.32, 1.0
 animation windows, 1, 180, myQuint
 animation workspaces, 1, 300, easeOutQuint
 ```
+
+### 下拉窗口（dropdown）
+
+Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可以向上（或向下）滑出屏幕，
+进程保持存活于 scratchpad，再次触发时作为面板滑回。
+
+```text
+dropdown_height <0.1-1.0>      # 面板高度占工作区高度的比例，默认 0.5
+dropdown_position top|bottom   # 从顶部或底部滑入，默认 top
+animation dropdown, <开关>, <时长 ms>, <曲线名>   # 默认 250ms / easeOutQuint
+```
+
+- 几何使用工作区 `ws->rect`（已包含 outer gaps）。`dropdown_height` / `dropdown_position`
+  给出默认值；单次调用还可以用几何参数覆盖（见下）。
+- 隐藏时先播放滑出动画，动画结束后才移入 `__i3_scratch`；显示时从屏幕外滑到目标位置。
+  `animations off` 或时长为 0 时立即显示/隐藏。
+- 命令（支持标准 criteria 前缀）：
+
+```text
+dropdown toggle [<position>,<height>,<width>,<align>]   # 焦点优先：转换/收起当前窗口
+dropdown show   [<position>,<height>,<width>,<align>]   # 显示当前焦点窗口
+dropdown hide                                           # 隐藏当前可见的下拉窗口（忽略几何参数）
+dropdown recall [<position>,<height>,<width>,<align>]   # 召回最近隐藏的下拉窗口
+[instance="drop"] dropdown toggle "bottom,0.25,0.4,right"
+```
+
+几何参数是一个可选的、逗号分隔的字符串，四个字段都可以留空：
+
+| 字段 | 取值 | 缺省 |
+|------|------|------|
+| position | `top` / `bottom` | 配置 `dropdown_position` |
+| height | `0.05`–`1.0`（占工作区高度比例） | 配置 `dropdown_height` |
+| width | `0.05`–`1.0`（占工作区宽度比例） | `1.0`（全宽） |
+| align | `left` / `center` / `right` | `center` |
+
+- 字段为空（如 `"bottom,,0.4,"`）时沿用上表缺省；非法字段会记 ELOG 并忽略。
+- 覆盖值保存在该客户端上：后续不带几何参数的 `dropdown toggle` 会继续使用，
+  直到下一次带参数调用将其改写。
+- 通用用法：先用 `$mod+Return` 等正常方式启动任意 GUI 程序，再按 `$mod+\`
+  把它变成下拉面板；再按一次收起。GPUI/终端/浏览器等都可以。
+  下面的绑定即可覆盖原来 quake-term 的两条规则：
+
+```text
+# 当前焦点窗口：不是下拉则转换并显示，是下拉则收起
+bindsym $mod+backslash dropdown toggle
+
+# 召回最近隐藏的下拉窗口（可连续用于多个应用）
+bindsym $mod+Shift+backslash dropdown recall
+```
+
+- 需要按应用固定几何时，仍可用 criteria：
+  `[instance="quake-alacritty"] dropdown toggle "bottom,0.25,0.4,right"`。
+- `~/.config/i3/bin/i3-dropdown` 是一个可选的启动/切换助手：
+  `-i/--instance` 指定 WM_CLASS 实例名，`-W` 追加当前焦点工作区 id（如
+  `quake-st:1`），`-s/--spec` 传给 `dropdown` 命令，`--` 之后是要启动的命令；
+  命令参数中的字面量 `{instance}` 会被替换为最终实例名。窗口已存在时直接切换，
+  否则启动命令并在 5 秒内轮询 `dropdown show` 直到窗口出现。纯通用键位不需要它。
+
+无 criteria 的 `dropdown toggle` 是焦点优先：焦点窗口是可见下拉时收起它，否则把当前
+焦点窗口转换为下拉并显示。隐藏后焦点交还给原来的可见窗口；用 `dropdown recall`
+重新打开最近隐藏的那个下拉窗口。
+
+> 已知限制：下拉标记不做 restart/配置重载持久化，i3 重启后窗口恢复为普通 scratchpad 窗口。
 
 ## 三、布局
 
@@ -180,6 +244,7 @@ snap left|right|up|down                            # 浮动窗口贴边；平铺
 snap top-left|top-right|bottom-left|bottom-right   # 直接贴到四分屏
 switcher next|prev                                 # Alt+Tab 缩略图切换器（打开/循环）
 switcher commit|close                              # 确认 / 取消
+dropdown toggle|show|hide [<spec>]                 # 下拉窗口（支持 criteria 与几何参数）
 ```
 
 `snap` 的行为（KDE Quick Tile 风格）：
@@ -263,7 +328,8 @@ bindsym Mod1+Shift+Tab switcher prev
 | `title_align` | `center` | `title_align left` |
 | 标题栏配色 | 深色面板（背景 `#11111b`/`#181825`，文字 `#cdd6f4`，accent `#f9e2af`） | 用 `client.*` 颜色指令覆盖 |
 | `titlebar_font` | 回退全局 `font` | — |
-| 动画 | 总开关开，windows 180ms / open 220ms / close 150ms / workspaces 300ms，`easeOutQuint` | `animations off` |
+| 动画 | 总开关开，windows 180ms / open 220ms / close 150ms / workspaces 300ms / dropdown 250ms，`easeOutQuint` | `animations off` |
+| 下拉窗口 | `dropdown_height 0.5`、`dropdown_position top` | `dropdown_position bottom` |
 
 ### 配置热重载（Hyprland 风格）
 

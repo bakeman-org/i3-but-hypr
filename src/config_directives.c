@@ -1113,13 +1113,42 @@ CFGFUN(animation, const char *spec) {
         matched = true;
     }
 
+    if (global || strcasecmp(kind, "dropdown") == 0) {
+        config.animation_dropdown_duration = on ? ms : 0;
+        if (have_curve) {
+            snprintf(config.animation_dropdown_curve,
+                     sizeof(config.animation_dropdown_curve), "%s", curve);
+        }
+        matched = true;
+    }
+
     if (!matched) {
         ELOG("Unknown animation type \"%s\", expected one of windows, "
-             "windowsIn, windowsOut, fadeIn, fadeOut, workspaces, global\n",
+             "windowsIn, windowsOut, fadeIn, fadeOut, workspaces, dropdown, "
+             "global\n",
              kind);
     }
 
     FREE(copy);
+}
+
+CFGFUN(dropdown_height, const char *value) {
+    double ratio = strtod(value, NULL);
+    if (ratio < 0.1 || ratio > 1.0) {
+        ELOG("dropdown_height must be between 0.1 and 1.0, ignoring \"%s\"\n", value);
+        return;
+    }
+    config.dropdown_height = ratio;
+}
+
+CFGFUN(dropdown_position, const char *value) {
+    if (strcasecmp(value, "top") == 0) {
+        config.dropdown_position = 0;
+    } else if (strcasecmp(value, "bottom") == 0) {
+        config.dropdown_position = 1;
+    } else {
+        ELOG("dropdown_position must be 'top' or 'bottom', ignoring \"%s\"\n", value);
+    }
 }
 
 CFGFUN(master_ratio, const char *value) {

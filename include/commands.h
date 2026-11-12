@@ -298,6 +298,12 @@ void cmd_move_scratchpad(I3_CMD);
 void cmd_scratchpad_show(I3_CMD);
 
 /**
+ * Implementation of 'dropdown toggle|show|hide [<spec>]'.
+ *
+ */
+void cmd_dropdown(I3_CMD, const char *action, const char *spec);
+
+/**
  * Implementation of 'swap [container] [with] id|con_id|mark <arg>'.
  *
  */

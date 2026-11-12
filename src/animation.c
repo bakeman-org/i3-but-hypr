@@ -323,6 +323,13 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
             if (anim->fade) {
                 animation_set_opacity(con, anim->opacity_to);
             }
+            if (anim->dropdown_hide_pending) {
+                /* The dropdown finished sliding off-screen: move it to the
+                 * scratchpad and force a render so the window is unmapped. */
+                anim->dropdown_hide_pending = false;
+                scratchpad_move(con);
+                geometry_changed = true;
+            }
             continue;
         }
 

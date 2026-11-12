@@ -87,6 +87,32 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 `scroller_structs = 20`、`scroller_prefer_overspread = true`）。
 用法示例见 `docs/hyprland-mangowc-config.zh.md`。
 
+### 6. 下拉窗口（`src/dropdown.c`、`include/dropdown.h`，全新文件）
+
+Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scratchpad 并作为面板重新滑入。
+
+- 新命令 `dropdown toggle|show|hide|recall`，自动支持 criteria 前缀（如
+  `[instance="drop"] dropdown toggle`）。无 criteria 的 `toggle` 为焦点优先：
+  焦点窗口是可见下拉窗口则隐藏；否则把焦点窗口转换为下拉并显示。
+  `dropdown recall` 重新打开最近隐藏的下拉窗口，用于隐藏后快速找回。
+- 单次调用可带几何参数：`dropdown toggle "bottom,0.25,0.4,right"`
+  （字段 `position,height,width,align`，可留空，缺省取配置/全宽/居中）。
+  覆盖值保存在客户端上，后续无参调用沿用，隐藏时按客户端自身的位置滑出。
+- 新增 `~/.config/i3/bin/i3-dropdown` 启动/切换助手（Python 3 标准库）：
+  `-i 实例名 [-W] [-s 几何] -- 命令...`，可选把焦点工作区 id 追加到实例名，
+  替换命令里的 `{instance}` 占位符；窗口不存在时启动并轮询 `dropdown show`。
+  纯通用键位不需要它；用户的 quake-term 规则已迁移为通用 `$mod+\` /
+  `$mod+Shift+\` 绑定。
+- 几何：默认顶部/底部、工作区全宽、高度为 `ws->rect`（含 outer gaps）的
+  `dropdown_height` 比例，位置由 `dropdown_position top|bottom` 控制。
+- 隐藏时先按 `animation dropdown` 的时长/曲线滑出屏幕，动画结束回调
+  （`animation.c` 的 `dropdown_hide_pending`）才移入 `__i3_scratch`，进程保持存活；
+  显示时从屏幕外滑回目标矩形。`animations off` 或时长为 0 时立即生效。
+- 隐藏完成后由 `con_move_to_workspace` 恢复焦点到原来的可见窗口。
+- IPC `get_tree` 为每个容器输出 `dropdown` 布尔字段。
+- 限制：`dropdown` 标记不参与 restart/load_layout 持久化，重启后窗口退化为普通
+  scratchpad 窗口。
+
 ## 二、性能优化（本次）
 
 渲染路径是 fork 的性能关键：动画开启时 `tree_render()` 以 60 Hz 运行，

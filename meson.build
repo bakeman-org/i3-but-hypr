@@ -392,6 +392,7 @@ i3srcs = [
   'src/config_watcher.c',
   'src/display_version.c',
   'src/drag.c',
+  'src/dropdown.c',
   'src/ewmh.c',
   'src/fake_outputs.c',
   'src/floating.c',

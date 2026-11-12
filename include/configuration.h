@@ -339,8 +339,16 @@ struct Config {
     /* Name of the bezier curve used when a window opens/closes. */
     char animation_open_curve[64];
     char animation_close_curve[64];
+    /* Animation used when showing/hiding dropdown windows. */
+    int animation_dropdown_duration;
+    char animation_dropdown_curve[64];
     /* Whether new windows fade in (Hyprland's fadeIn). */
     bool animation_fade;
+
+    /* Fraction of the workspace height used by dropdown windows. */
+    double dropdown_height;
+    /* Edge from which dropdown windows slide in: 0 = top, 1 = bottom. */
+    int dropdown_position;
 
     /* Fraction of the width used by the master area in the master layout. */
     double master_ratio;

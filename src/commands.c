@@ -2043,6 +2043,41 @@ void cmd_scratchpad_show(I3_CMD) {
 }
 
 /*
+ * Implementation of 'dropdown toggle|show|hide [<spec>]'.
+ *
+ */
+void cmd_dropdown(I3_CMD, const char *action, const char *spec) {
+    DLOG("dropdown %s (spec = %s)\n", action, spec ? spec : "(null)");
+    bool result = false;
+
+    if (strcmp(action, "recall") == 0) {
+        result = dropdown_recall(spec);
+    } else if (match_is_empty(current_match)) {
+        if (strcmp(action, "toggle") == 0) {
+            result = dropdown_toggle_global(spec);
+        } else if (strcmp(action, "show") == 0) {
+            result = dropdown_show_global(spec);
+        } else {
+            result = dropdown_hide_global();
+        }
+    } else {
+        owindow *current;
+        TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+            if (strcmp(action, "toggle") == 0) {
+                result |= dropdown_toggle(current->con, spec);
+            } else if (strcmp(action, "show") == 0) {
+                result |= dropdown_show(current->con, spec);
+            } else {
+                result |= dropdown_hide(current->con);
+            }
+        }
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(result);
+}
+
+/*
  * Implementation of 'swap [container] [with] id|con_id|mark <arg>'.
  *
  */

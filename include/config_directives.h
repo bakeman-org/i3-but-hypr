@@ -118,6 +118,8 @@ CFGFUN(bar_start);
 CFGFUN(bar_finish);
 CFGFUN(animations, const char *value);
 CFGFUN(animation, const char *spec);
+CFGFUN(dropdown_height, const char *value);
+CFGFUN(dropdown_position, const char *value);
 CFGFUN(bezier, const char *spec);
 CFGFUN(master_ratio, const char *value);
 CFGFUN(active_opacity, const char *value);

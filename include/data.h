@@ -714,6 +714,9 @@ typedef struct con_anim {
     int slide_dx;
     /* whether this container's frame was ever pushed to X11 while mapped */
     bool ever_pushed;
+    /* Set while a dropdown hide animation is running. When the animation
+     * finishes, the container is moved to the scratchpad (see dropdown.c). */
+    bool dropdown_hide_pending;
 } con_anim;
 
 /**
@@ -878,6 +881,18 @@ struct Con {
         /* The user changed position/size of the scratchpad window. */
         SCRATCHPAD_CHANGED = 2
     } scratchpad_state;
+
+    /* Whether this window was turned into a dropdown window (see
+     * src/dropdown.c). Only meaningful on client containers. */
+    bool dropdown;
+
+    /* Per-invocation dropdown geometry overrides (see src/dropdown.c). The
+     * values are only used when dropdown_geometry_valid is set. */
+    bool dropdown_geometry_valid;
+    double dropdown_height;
+    double dropdown_width;
+    int dropdown_position; /* 0 top, 1 bottom */
+    int dropdown_align;    /* 0 left, 1 center, 2 right */
 
     /* The ID of this container before restarting. Necessary to correctly
      * interpret back-references in the JSON (such as the focus stack). */
