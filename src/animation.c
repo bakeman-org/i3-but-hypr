@@ -28,6 +28,12 @@ static const bezier_def builtin_beziers[] = {
     {"easeOutCubic", 0.33, 1.0, 0.68, 1.0},
     {"easeOutQuint", 0.23, 1.0, 0.32, 1.0},
     {"easeOutExpo", 0.16, 1.0, 0.30, 1.0},
+    /* Overshooting curves: useful for window opening and workspace switches
+     * where a small settle adds tactility (comparable to Clarion's spring
+     * trajectories, expressed as a cubic bezier). */
+    {"easeOutBack", 0.34, 1.56, 0.64, 1.0},
+    {"easeInOutBack", 0.68, -0.6, 0.32, 1.6},
+    {"easeOutCirc", 0.0, 0.55, 0.45, 1.0},
     {"easeInOutCubic", 0.65, 0.0, 0.35, 1.0},
     {"easeInOutQuint", 0.86, 0.0, 0.07, 1.0},
     {"easeInOutSine", 0.37, 0.0, 0.63, 1.0},
@@ -38,6 +44,11 @@ static int custom_beziers_count = 0;
 
 static ev_timer anim_timer;
 static bool timer_started = false;
+/* Measured render cost of the previous frames. It grows immediately when a
+ * frame is slow and decays slowly otherwise, so the timer pre-roll never
+ * oscillates between an occasional expensive frame and the normal cadence
+ * (the same idea as Clarion's latch budget estimate). */
+static double frame_cost_estimate = 0.0;
 
 static bool anim_rect_equals(anim_rect a, anim_rect b);
 
@@ -210,6 +221,13 @@ void animation_set_opacity(Con *con, double opacity) {
     }
 
     opacity = clamp_opacity(opacity);
+    if (con->anim.opacity_applied_valid &&
+        con->anim.opacity_applied == opacity) {
+        return;
+    }
+    con->anim.opacity_applied = opacity;
+    con->anim.opacity_applied_valid = true;
+
     uint32_t value = (uint32_t)(opacity * (double)UINT32_MAX);
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, con->window->id, atom_opacity,
                         XCB_ATOM_CARDINAL, 32, 1, &value);
@@ -232,20 +250,33 @@ void animation_apply_opacity(Con *con) {
     if (con == NULL || con->window == NULL) {
         return;
     }
-    if (config.active_opacity >= 0.999 && config.inactive_opacity >= 0.999 &&
-        !config.dim_inactive) {
-        /* Nothing configured, keep the window fully opaque. */
-        return;
-    }
+    /* No early return when nothing is configured: the cached value makes the
+     * write a no-op, while a stale dim/opacity left over from an earlier
+     * configuration is actively cleared to fully opaque. */
     animation_set_opacity(con, target_opacity(con));
 }
 
 void animation_focus_changed(Con *old, Con *new) {
-    if (!config.animations && !config.dim_inactive) {
+    if (!config.animations && !config.dim_inactive &&
+        config.active_opacity >= 0.999 && config.inactive_opacity >= 0.999) {
         return;
     }
     animation_apply_opacity(old);
     animation_apply_opacity(new);
+}
+
+/*
+ * Re-applies the opacity of every window after a configuration reload. Without
+ * this, disabling dim_inactive or the opacity settings would leave the windows
+ * at their previous (dimmed) property value until the next focus change.
+ */
+void animation_reapply_opacity(void) {
+    Con *con;
+    TAILQ_FOREACH (con, &all_cons, all_cons) {
+        if (con->window != NULL) {
+            animation_apply_opacity(con);
+        }
+    }
 }
 
 /******************************************************************************
@@ -267,6 +298,10 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
      * visible without re-rendering the layout, so pure fade animations must
      * not trigger the (comparatively expensive) tree_render() every frame. */
     bool geometry_changed = false;
+    /* Whether any animation is still running after this tick. Tracked here so
+     * that animation_running() does not have to traverse all containers again
+     * on every frame. */
+    bool still_running = false;
 
     Con *con;
     TAILQ_FOREACH (con, &all_cons, all_cons) {
@@ -295,6 +330,11 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
         if (!isfinite(eased)) {
             eased = 1.0;
         }
+        if (anim->fade) {
+            /* Overshooting easing curves are great for geometry, but an
+             * opacity above 1.0 would just clamp and stall. */
+            eased = MAX(0.0, MIN(1.0, eased));
+        }
         anim_rect cur = {
             .x = (int32_t)lround(anim->from.x + (anim->to.x - anim->from.x) * eased),
             .y = (int32_t)lround(anim->from.y + (anim->to.y - anim->from.y) * eased),
@@ -307,20 +347,29 @@ static void animation_tick_cb(EV_P_ ev_timer *w, int revents) {
             animation_set_opacity(con, anim->opacity_from +
                                           (anim->opacity_to - anim->opacity_from) * eased);
         }
+        still_running = true;
     }
 
     if (geometry_changed) {
         tree_render();
     }
 
-    if (!animation_running()) {
+    if (!still_running) {
         ev_timer_stop(main_loop, &anim_timer);
         timer_started = false;
     } else {
         /* Keep a steady 60 Hz cadence: a slow render shortens the sleep
-         * instead of pushing every subsequent frame back by that amount. */
-        const double spent = ev_now(EV_A) - frame_start;
-        w->repeat = MAX(0.001, 1.0 / 60.0 - spent);
+         * instead of pushing every subsequent frame back by that amount. The
+         * estimate grows immediately and decays slowly so a single heavy frame
+         * does not shift the whole animation, while a sustained load (e.g. a
+         * full-workspace slide) is accounted for. */
+        const double spent = MAX(0.0, ev_now(EV_A) - frame_start);
+        if (frame_cost_estimate <= 0.0 || spent >= frame_cost_estimate) {
+            frame_cost_estimate = spent;
+        } else {
+            frame_cost_estimate -= (frame_cost_estimate - spent) / 16.0;
+        }
+        w->repeat = MAX(0.001, 1.0 / 60.0 - frame_cost_estimate);
         ev_timer_again(main_loop, w);
     }
 }
@@ -375,6 +424,12 @@ void animation_begin(Con *con, anim_rect from, anim_rect to, const char *curve, 
     anim->fade = fade;
     anim->opacity_from = fade ? 0.0 : 1.0;
     anim->opacity_to = target_opacity(con);
+    if (fade) {
+        /* Apply the start value right away. Otherwise the first rendered frame
+         * would still be fully opaque and the window would visibly flash
+         * before the fade-in starts. */
+        animation_set_opacity(con, anim->opacity_from);
+    }
     animation_start_timer();
 }
 

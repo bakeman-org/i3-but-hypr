@@ -74,3 +74,11 @@ void animation_apply_opacity(Con *con);
  *
  */
 void animation_focus_changed(Con *old, Con *new);
+
+/**
+ * Re-applies the configured opacity to every managed window. Called after a
+ * configuration reload so that disabling `dim_inactive`/opacity settings takes
+ * effect immediately.
+ *
+ */
+void animation_reapply_opacity(void);

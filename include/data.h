@@ -703,6 +703,12 @@ typedef struct con_anim {
     bool fade;
     double opacity_from;
     double opacity_to;
+    /* Last opacity that was written to the _NET_WM_WINDOW_OPACITY property of
+     * this container (client and frame). Focus changes during a dim
+     * transition would otherwise issue two property writes per container even
+     * when the value did not change. */
+    double opacity_applied;
+    bool opacity_applied_valid;
     /* pending slide-in, set when the container's workspace is switched to */
     bool slide_pending;
     int slide_dx;

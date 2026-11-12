@@ -589,55 +589,48 @@ Con *con_parent_with_orientation(Con *con, orientation_t orientation) {
 }
 
 /*
- * helper data structure for the breadth-first-search in
- * con_get_fullscreen_con()
- *
- */
-struct bfs_entry {
-    Con *con;
-
-    TAILQ_ENTRY(bfs_entry) entries;
-};
-
-/*
  * Returns the first fullscreen node below this node.
  *
  */
 Con *con_get_fullscreen_con(Con *con, fullscreen_mode_t fullscreen_mode) {
     /* TODO: is breadth-first-search really appropriate? (check as soon as
      * fullscreen levels and fullscreen for containers is implemented) */
-    TAILQ_HEAD(bfs_head, bfs_entry) bfs_head = TAILQ_HEAD_INITIALIZER(bfs_head);
-    struct bfs_entry *entry = smalloc(sizeof(struct bfs_entry));
-    entry->con = con;
-    TAILQ_INSERT_TAIL(&bfs_head, entry, entries);
+    /* The queue is kept between calls: this function runs for many containers
+     * on every render pass (i.e. at animation frame rate), so allocating a
+     * queue entry per visited container made rendering significantly more
+     * expensive. */
+    static Con **queue = NULL;
+    static size_t queue_capacity = 0;
+    size_t head = 0;
+    size_t tail = 0;
 
-    while (!TAILQ_EMPTY(&bfs_head)) {
-        entry = TAILQ_FIRST(&bfs_head);
-        Con *current = entry->con;
+    if (queue_capacity == 0) {
+        queue_capacity = 64;
+        queue = smalloc(queue_capacity * sizeof(Con *));
+    }
+    queue[tail++] = con;
+
+    while (head < tail) {
+        Con *current = queue[head++];
         if (current != con && current->fullscreen_mode == fullscreen_mode) {
-            /* empty the queue */
-            while (!TAILQ_EMPTY(&bfs_head)) {
-                entry = TAILQ_FIRST(&bfs_head);
-                TAILQ_REMOVE(&bfs_head, entry, entries);
-                free(entry);
-            }
             return current;
         }
 
-        TAILQ_REMOVE(&bfs_head, entry, entries);
-        free(entry);
-
         Con *child;
         TAILQ_FOREACH (child, &(current->nodes_head), nodes) {
-            entry = smalloc(sizeof(struct bfs_entry));
-            entry->con = child;
-            TAILQ_INSERT_TAIL(&bfs_head, entry, entries);
+            if (tail == queue_capacity) {
+                queue_capacity *= 2;
+                queue = srealloc(queue, queue_capacity * sizeof(Con *));
+            }
+            queue[tail++] = child;
         }
 
         TAILQ_FOREACH (child, &(current->floating_head), floating_windows) {
-            entry = smalloc(sizeof(struct bfs_entry));
-            entry->con = child;
-            TAILQ_INSERT_TAIL(&bfs_head, entry, entries);
+            if (tail == queue_capacity) {
+                queue_capacity *= 2;
+                queue = srealloc(queue, queue_capacity * sizeof(Con *));
+            }
+            queue[tail++] = child;
         }
     }
 

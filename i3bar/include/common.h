@@ -38,6 +38,10 @@ struct status_block_render_desc {
     uint32_t width;
     uint32_t x_offset;
     uint32_t x_append;
+    /* Cached raw text width (without borders) and whether it is valid for the
+     * current text and font. */
+    uint32_t text_width;
+    bool width_valid;
 };
 
 /* This data structure represents one JSON dictionary, multiple of these make

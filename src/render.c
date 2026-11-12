@@ -13,8 +13,8 @@
 #include <math.h>
 
 /* Forward declarations */
-static int *precalculate_sizes(Con *con, render_params *p);
-static Rect *precalculate_layout_rects(Con *con, render_params *p);
+static int *precalculate_sizes(Con *con, render_params *p, int *stack, int stack_capacity, bool *heap_allocated);
+static Rect *precalculate_layout_rects(Con *con, render_params *p, Rect *stack, int stack_capacity, bool *heap_allocated);
 static void render_root(Con *con, Con *fullscreen);
 static void render_output(Con *con);
 static void render_con_split(Con *con, Con *child, render_params *p, int i);
@@ -25,6 +25,14 @@ static void render_con_dwindle(Con *con, Con *child, render_params *p, int i);
 static void render_con_master(Con *con, Con *child, render_params *p, int i);
 static void render_leaf_deco(Con *child, int deco_height);
 static void render_con_scroller(Con *con, Con *child, render_params *p, int i);
+
+/* Per-child scratch arrays are kept on the stack for containers with few
+ * children (the common case) instead of allocating them on every render. */
+enum { RENDER_STACK_CHILDREN = 16 };
+
+/* Nesting depth of render_con() calls. Values which are constant for the whole
+ * render pass (and only for that long) are cached while depth > 0. */
+static int render_depth = 0;
 
 /*
  * Returns the height for the decorations
@@ -42,11 +50,23 @@ int render_deco_height(void) {
  *
  */
 void render_con(Con *con) {
+    if (render_depth++ == 0) {
+        /* The tree, focus and configuration are constant for the whole render
+         * pass, so gaps may be cached (see gaps.c). */
+        gaps_render_cache_begin();
+    }
+
     render_params params = {
         .rect = con->rect,
         .x = con->rect.x,
         .y = con->rect.y,
         .children = con_num_children(con)};
+
+    /* Per-child scratch arrays, usually on the stack (see render_out). */
+    int sizes_stack[RENDER_STACK_CHILDREN];
+    Rect rects_stack[RENDER_STACK_CHILDREN];
+    bool sizes_heap = false;
+    bool rects_heap = false;
 
     DLOG("Rendering node %p / %s / layout %d / children %d\n", con, con->name,
          con->layout, params.children);
@@ -140,7 +160,7 @@ void render_con(Con *con) {
          * have not yet been rendered (see the CT_ROOT code path below). See
          * also https://bugs.i3wm.org/1393 */
         if (con->type != CT_ROOT) {
-            return;
+            goto render_out;
         }
     }
 
@@ -148,8 +168,8 @@ void render_con(Con *con) {
     params.deco_height = render_deco_height();
 
     /* precalculate the sizes to be able to correct rounding errors */
-    params.sizes = precalculate_sizes(con, &params);
-    params.layout_rects = precalculate_layout_rects(con, &params);
+    params.sizes = precalculate_sizes(con, &params, sizes_stack, RENDER_STACK_CHILDREN, &sizes_heap);
+    params.layout_rects = precalculate_layout_rects(con, &params, rects_stack, RENDER_STACK_CHILDREN, &rects_heap);
 
     if (con->layout == L_OUTPUT) {
         /* Skip i3-internal outputs */
@@ -228,16 +248,32 @@ void render_con(Con *con) {
     }
 
 free_params:
-    FREE(params.sizes);
-    FREE(params.layout_rects);
+    if (sizes_heap) {
+        FREE(params.sizes);
+    }
+    if (rects_heap) {
+        FREE(params.layout_rects);
+    }
+
+render_out:
+    if (--render_depth == 0) {
+        gaps_render_cache_end();
+    }
 }
 
-static int *precalculate_sizes(Con *con, render_params *p) {
+static int *precalculate_sizes(Con *con, render_params *p, int *stack, int stack_capacity, bool *heap_allocated) {
+    *heap_allocated = false;
     if ((con->layout != L_SPLITH && con->layout != L_SPLITV) || p->children <= 0) {
         return NULL;
     }
 
-    int *sizes = smalloc(p->children * sizeof(int));
+    int *sizes;
+    if (p->children <= stack_capacity) {
+        sizes = stack;
+    } else {
+        sizes = smalloc((size_t)p->children * sizeof(int));
+        *heap_allocated = true;
+    }
     assert(!TAILQ_EMPTY(&con->nodes_head));
 
     Con *child;
@@ -538,13 +574,20 @@ static void render_leaf_deco(Con *child, int deco_height) {
  * rate.
  *
  */
-static Rect *precalculate_layout_rects(Con *con, render_params *p) {
+static Rect *precalculate_layout_rects(Con *con, render_params *p, Rect *stack, int stack_capacity, bool *heap_allocated) {
+    *heap_allocated = false;
     if (p->children <= 0 ||
         (con->layout != L_DWINDLE && con->layout != L_SCROLLER)) {
         return NULL;
     }
 
-    Rect *rects = smalloc((size_t)p->children * sizeof(Rect));
+    Rect *rects;
+    if (p->children <= stack_capacity) {
+        rects = stack;
+    } else {
+        rects = smalloc((size_t)p->children * sizeof(Rect));
+        *heap_allocated = true;
+    }
 
     if (con->layout == L_SCROLLER) {
         int count = 0;

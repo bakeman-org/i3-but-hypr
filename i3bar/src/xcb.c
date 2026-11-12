@@ -202,7 +202,11 @@ static void predict_block_length(struct status_block *block) {
         return;
     }
 
-    render->width = predict_text_width(text);
+    if (!render->width_valid) {
+        render->text_width = predict_text_width(text);
+        render->width_valid = true;
+    }
+    render->width = render->text_width;
     if (block->border) {
         render->width += logical_px(block->border_left + block->border_right);
     }
@@ -2113,6 +2117,15 @@ static void draw_button(surface_t *surface, color_t fg_color, color_t bg_color, 
 void draw_bars(bool unhide) {
     DLOG("Drawing bars...\n");
 
+    /* Text widths may depend on the font, which can change between draws.
+     * Invalidate them once per draw so that the (expensive) measurement is
+     * done at most once per block, even with multiple outputs. */
+    struct status_block *block;
+    TAILQ_FOREACH (block, &statusline_head, blocks) {
+        block->full_render.width_valid = false;
+        block->short_render.width_valid = false;
+    }
+
     i3_output *outputs_walk;
     SLIST_FOREACH (outputs_walk, outputs, slist) {
         int workspace_width = logical_px(config.padding.x);
@@ -2189,7 +2202,6 @@ void draw_bars(bool unhide) {
             uint32_t clip_left = 0;
 
             /* Reset short mode between outputs */
-            struct status_block *block;
             TAILQ_FOREACH (block, &statusline_head, blocks) {
                 block->use_short = false;
             }
@@ -2237,8 +2249,8 @@ void redraw_bars(void) {
 
         draw_util_copy_surface(&(outputs_walk->buffer), &(outputs_walk->bar), 0, 0,
                                0, 0, outputs_walk->rect.w, outputs_walk->rect.h);
-        xcb_flush(xcb_connection);
     }
+    xcb_flush(xcb_connection);
 }
 
 /*

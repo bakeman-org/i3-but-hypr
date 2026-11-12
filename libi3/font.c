@@ -36,6 +36,109 @@ static PangoLayout *create_layout_with_dpi(cairo_t *cr) {
 }
 
 /*
+ * Creating a cairo context and a Pango layout for every width prediction and
+ * every drawn text is by far the most expensive part of rendering the status
+ * bar: each redraw measures and draws one layout per block. Cache one layout
+ * for measuring and one for drawing instead. They are recreated only when the
+ * font, the DPI or (for drawing) the target surface changes.
+ *
+ */
+static struct {
+    cairo_surface_t *surface;
+    cairo_t *cr;
+    PangoLayout *layout;
+    const PangoFontDescription *desc;
+    long dpi;
+} measure_cache, draw_cache;
+
+static void pango_cache_reset(void) {
+    if (measure_cache.layout != NULL) {
+        g_object_unref(measure_cache.layout);
+        measure_cache.layout = NULL;
+    }
+    if (measure_cache.cr != NULL) {
+        cairo_destroy(measure_cache.cr);
+        measure_cache.cr = NULL;
+    }
+    if (measure_cache.surface != NULL) {
+        cairo_surface_destroy(measure_cache.surface);
+        measure_cache.surface = NULL;
+    }
+    measure_cache.desc = NULL;
+
+    if (draw_cache.layout != NULL) {
+        g_object_unref(draw_cache.layout);
+        draw_cache.layout = NULL;
+    }
+    if (draw_cache.cr != NULL) {
+        cairo_destroy(draw_cache.cr);
+        draw_cache.cr = NULL;
+    }
+    /* The draw surface is owned by the caller, not by us. */
+    draw_cache.surface = NULL;
+    draw_cache.desc = NULL;
+}
+
+/*
+ * Returns the cached layout used to measure text widths.
+ *
+ */
+static PangoLayout *get_measure_layout(void) {
+    const PangoFontDescription *desc = savedFont->specific.pango_desc;
+    const long dpi = get_dpi_value();
+
+    if (measure_cache.layout != NULL &&
+        measure_cache.desc == desc &&
+        measure_cache.dpi == dpi) {
+        return measure_cache.layout;
+    }
+
+    if (measure_cache.layout != NULL) {
+        g_object_unref(measure_cache.layout);
+    }
+    if (measure_cache.cr == NULL) {
+        measure_cache.surface = cairo_xcb_surface_create(conn, root_screen->root, root_visual_type, 1, 1);
+        measure_cache.cr = cairo_create(measure_cache.surface);
+    }
+    measure_cache.layout = create_layout_with_dpi(measure_cache.cr);
+    pango_layout_set_font_description(measure_cache.layout, desc);
+    measure_cache.desc = desc;
+    measure_cache.dpi = dpi;
+
+    return measure_cache.layout;
+}
+
+/*
+ * Returns the cached layout used to draw text on the given surface.
+ *
+ */
+static PangoLayout *get_draw_layout(cairo_surface_t *surface, cairo_t **cr) {
+    const PangoFontDescription *desc = savedFont->specific.pango_desc;
+    const long dpi = get_dpi_value();
+
+    if (draw_cache.layout == NULL ||
+        draw_cache.desc != desc ||
+        draw_cache.dpi != dpi ||
+        draw_cache.surface != surface) {
+        if (draw_cache.layout != NULL) {
+            g_object_unref(draw_cache.layout);
+        }
+        if (draw_cache.cr != NULL) {
+            cairo_destroy(draw_cache.cr);
+        }
+        draw_cache.cr = cairo_create(surface);
+        draw_cache.layout = create_layout_with_dpi(draw_cache.cr);
+        pango_layout_set_font_description(draw_cache.layout, desc);
+        draw_cache.surface = surface;
+        draw_cache.desc = desc;
+        draw_cache.dpi = dpi;
+    }
+
+    *cr = draw_cache.cr;
+    return draw_cache.layout;
+}
+
+/*
  * Loads a Pango font description into an i3Font structure. Returns true
  * on success, false otherwise.
  *
@@ -85,10 +188,9 @@ static bool load_pango_font(i3Font *font, const char *desc) {
 static void draw_text_pango(const char *text, size_t text_len,
                             xcb_drawable_t drawable, cairo_surface_t *surface,
                             int x, int y, int max_width, bool pango_markup) {
-    /* Create the Pango layout */
-    /* root_visual_type is cached in load_pango_font */
-    cairo_t *cr = cairo_create(surface);
-    PangoLayout *layout = create_layout_with_dpi(cr);
+    /* Reuse the cached cairo context and Pango layout for this surface. */
+    cairo_t *cr;
+    PangoLayout *layout = get_draw_layout(surface, &cr);
     gint height;
 
     pango_layout_set_font_description(layout, savedFont->specific.pango_desc);
@@ -113,9 +215,10 @@ static void draw_text_pango(const char *text, size_t text_len,
     cairo_move_to(cr, x, y - yoffset);
     pango_cairo_show_layout(cr, layout);
 
-    /* Free resources */
-    g_object_unref(layout);
-    cairo_destroy(cr);
+    /* The context is cached and reused, so do not leave a current path behind:
+     * other drawing code calls cairo_surface_flush(), which must not happen
+     * while a context has an active path. */
+    cairo_new_path(cr);
 }
 
 /*
@@ -123,15 +226,8 @@ static void draw_text_pango(const char *text, size_t text_len,
  *
  */
 static int predict_text_width_pango(const char *text, size_t text_len, bool pango_markup) {
-    /* Create a dummy Pango layout */
-    /* root_visual_type is cached in load_pango_font */
-    cairo_surface_t *surface = cairo_xcb_surface_create(conn, root_screen->root, root_visual_type, 1, 1);
-    cairo_t *cr = cairo_create(surface);
-    PangoLayout *layout = create_layout_with_dpi(cr);
-
-    /* Get the font width */
-    gint width;
-    pango_layout_set_font_description(layout, savedFont->specific.pango_desc);
+    /* Reuse the cached measuring layout. */
+    PangoLayout *layout = get_measure_layout();
 
     if (pango_markup) {
         pango_layout_set_markup(layout, text, text_len);
@@ -139,13 +235,9 @@ static int predict_text_width_pango(const char *text, size_t text_len, bool pang
         pango_layout_set_text(layout, text, text_len);
     }
 
-    pango_cairo_update_layout(cr, layout);
+    pango_cairo_update_layout(measure_cache.cr, layout);
+    gint width;
     pango_layout_get_pixel_size(layout, &width, NULL);
-
-    /* Free resources */
-    g_object_unref(layout);
-    cairo_destroy(cr);
-    cairo_surface_destroy(surface);
 
     return width;
 }
@@ -263,6 +355,10 @@ void set_font(i3Font *font) {
  *
  */
 void free_font(void) {
+    /* Drop any cached Pango layouts first: they must not outlive the font
+     * description they were created for. */
+    pango_cache_reset();
+
     /* if there is no saved font, simply return */
     if (savedFont == NULL) {
         return;
@@ -295,6 +391,8 @@ void free_font(void) {
  *
  */
 void free_font_struct(i3Font *font) {
+    pango_cache_reset();
+
     free(font->pattern);
     font->pattern = NULL;
     switch (font->type) {

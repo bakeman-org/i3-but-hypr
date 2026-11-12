@@ -15,6 +15,13 @@
  */
 gaps_t calculate_effective_gaps(Con *con);
 
+/**
+ * Enables/disables the per-render-pass cache of the (tree- and config-derived)
+ * gap values. Must be called around a full render pass.
+ */
+void gaps_render_cache_begin(void);
+void gaps_render_cache_end(void);
+
 /*
  * Decides whether the container should be inset.
  */

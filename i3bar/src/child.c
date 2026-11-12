@@ -61,12 +61,34 @@ yajl_handle parser;
 /* JSON generator for stdout */
 yajl_gen gen;
 
+typedef enum {
+    KEY_NONE = 0,
+    KEY_FULL_TEXT,
+    KEY_SHORT_TEXT,
+    KEY_COLOR,
+    KEY_BACKGROUND,
+    KEY_BORDER,
+    KEY_MARKUP,
+    KEY_ALIGN,
+    KEY_MIN_WIDTH,
+    KEY_NAME,
+    KEY_INSTANCE,
+    KEY_URGENT,
+    KEY_SEPARATOR,
+    KEY_SEPARATOR_BLOCK_WIDTH,
+    KEY_BORDER_TOP,
+    KEY_BORDER_RIGHT,
+    KEY_BORDER_BOTTOM,
+    KEY_BORDER_LEFT,
+} block_key_t;
+
 typedef struct parser_ctx {
     /* True if one of the parsed blocks was urgent */
     bool has_urgent;
 
-    /* A copy of the last JSON map key. */
-    char *last_map_key;
+    /* The current map key, interned so that parsing a status update does not
+     * allocate a string for every key. */
+    block_key_t key;
 
     /* The current block. Will be filled, then copied and put into the list of
      * blocks. */
@@ -105,12 +127,16 @@ void clear_statusline(struct statusline_head *head, bool free_resources) {
     }
 }
 
-static void copy_statusline(struct statusline_head *from, struct statusline_head *to) {
+/*
+ * Move all blocks from one statusline to another. This avoids the previous
+ * allocate-and-copy of every block (and its whole owning structure) on each
+ * status update.
+ */
+static void move_statusline(struct statusline_head *from, struct statusline_head *to) {
     struct status_block *current;
-    TAILQ_FOREACH (current, from, blocks) {
-        struct status_block *new_block = smalloc(sizeof(struct status_block));
-        memcpy(new_block, current, sizeof(struct status_block));
-        TAILQ_INSERT_TAIL(to, new_block, blocks);
+    while ((current = TAILQ_FIRST(from)) != NULL) {
+        TAILQ_REMOVE(from, current, blocks);
+        TAILQ_INSERT_TAIL(to, current, blocks);
     }
 }
 
@@ -212,27 +238,67 @@ static int stdin_start_map(void *context) {
     return 1;
 }
 
+/* Case-insensitive comparison of a JSON key without allocating a string. */
+static bool key_is(const unsigned char *key, size_t len, const char *name) {
+    return len == strlen(name) && strncasecmp((const char *)key, name, len) == 0;
+}
+
 static int stdin_map_key(void *context, const unsigned char *key, size_t len) {
     parser_ctx *ctx = context;
-    FREE(ctx->last_map_key);
-    sasprintf(&(ctx->last_map_key), "%.*s", (int)len, key);
+
+    if (key_is(key, len, "full_text")) {
+        ctx->key = KEY_FULL_TEXT;
+    } else if (key_is(key, len, "short_text")) {
+        ctx->key = KEY_SHORT_TEXT;
+    } else if (key_is(key, len, "color")) {
+        ctx->key = KEY_COLOR;
+    } else if (key_is(key, len, "background")) {
+        ctx->key = KEY_BACKGROUND;
+    } else if (key_is(key, len, "border")) {
+        ctx->key = KEY_BORDER;
+    } else if (key_is(key, len, "markup")) {
+        ctx->key = KEY_MARKUP;
+    } else if (key_is(key, len, "align")) {
+        ctx->key = KEY_ALIGN;
+    } else if (key_is(key, len, "min_width")) {
+        ctx->key = KEY_MIN_WIDTH;
+    } else if (key_is(key, len, "name")) {
+        ctx->key = KEY_NAME;
+    } else if (key_is(key, len, "instance")) {
+        ctx->key = KEY_INSTANCE;
+    } else if (key_is(key, len, "urgent")) {
+        ctx->key = KEY_URGENT;
+    } else if (key_is(key, len, "separator")) {
+        ctx->key = KEY_SEPARATOR;
+    } else if (key_is(key, len, "separator_block_width")) {
+        ctx->key = KEY_SEPARATOR_BLOCK_WIDTH;
+    } else if (key_is(key, len, "border_top")) {
+        ctx->key = KEY_BORDER_TOP;
+    } else if (key_is(key, len, "border_right")) {
+        ctx->key = KEY_BORDER_RIGHT;
+    } else if (key_is(key, len, "border_bottom")) {
+        ctx->key = KEY_BORDER_BOTTOM;
+    } else if (key_is(key, len, "border_left")) {
+        ctx->key = KEY_BORDER_LEFT;
+    } else {
+        ctx->key = KEY_NONE;
+    }
+
     return 1;
 }
 
 static int stdin_boolean(void *context, int val) {
     parser_ctx *ctx = context;
 
-    if (!ctx->last_map_key) {
-        return 0;
-    }
-
-    if (strcasecmp(ctx->last_map_key, "urgent") == 0) {
-        ctx->block.urgent = val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "separator") == 0) {
-        ctx->block.no_separator = !val;
-        return 1;
+    switch (ctx->key) {
+        case KEY_URGENT:
+            ctx->block.urgent = val;
+            break;
+        case KEY_SEPARATOR:
+            ctx->block.no_separator = !val;
+            break;
+        default:
+            break;
     }
 
     return 1;
@@ -241,55 +307,45 @@ static int stdin_boolean(void *context, int val) {
 static int stdin_string(void *context, const unsigned char *val, size_t len) {
     parser_ctx *ctx = context;
 
-    if (!ctx->last_map_key) {
-        return 0;
-    }
-
-    if (strcasecmp(ctx->last_map_key, "full_text") == 0) {
-        ctx->block.full_text = i3string_from_markup_with_length((const char *)val, len);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "short_text") == 0) {
-        ctx->block.short_text = i3string_from_markup_with_length((const char *)val, len);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "color") == 0) {
-        sasprintf(&(ctx->block.color), "%.*s", (int)len, val);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "background") == 0) {
-        sasprintf(&(ctx->block.background), "%.*s", (int)len, val);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "border") == 0) {
-        sasprintf(&(ctx->block.border), "%.*s", (int)len, val);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "markup") == 0) {
-        ctx->block.pango_markup = (len == strlen("pango") && !strncasecmp((const char *)val, "pango", strlen("pango")));
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "align") == 0) {
-        if (len == strlen("center") && !strncmp((const char *)val, "center", strlen("center"))) {
-            ctx->block.align = ALIGN_CENTER;
-        } else if (len == strlen("right") && !strncmp((const char *)val, "right", strlen("right"))) {
-            ctx->block.align = ALIGN_RIGHT;
-        } else {
-            ctx->block.align = ALIGN_LEFT;
-        }
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "min_width") == 0) {
-        sasprintf(&(ctx->block.min_width_str), "%.*s", (int)len, val);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "name") == 0) {
-        sasprintf(&(ctx->block.name), "%.*s", (int)len, val);
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "instance") == 0) {
-        sasprintf(&(ctx->block.instance), "%.*s", (int)len, val);
-        return 1;
+    switch (ctx->key) {
+        case KEY_FULL_TEXT:
+            ctx->block.full_text = i3string_from_markup_with_length((const char *)val, len);
+            break;
+        case KEY_SHORT_TEXT:
+            ctx->block.short_text = i3string_from_markup_with_length((const char *)val, len);
+            break;
+        case KEY_COLOR:
+            sasprintf(&(ctx->block.color), "%.*s", (int)len, val);
+            break;
+        case KEY_BACKGROUND:
+            sasprintf(&(ctx->block.background), "%.*s", (int)len, val);
+            break;
+        case KEY_BORDER:
+            sasprintf(&(ctx->block.border), "%.*s", (int)len, val);
+            break;
+        case KEY_MARKUP:
+            ctx->block.pango_markup = (len == strlen("pango") && !strncasecmp((const char *)val, "pango", strlen("pango")));
+            break;
+        case KEY_ALIGN:
+            if (len == strlen("center") && !strncmp((const char *)val, "center", strlen("center"))) {
+                ctx->block.align = ALIGN_CENTER;
+            } else if (len == strlen("right") && !strncmp((const char *)val, "right", strlen("right"))) {
+                ctx->block.align = ALIGN_RIGHT;
+            } else {
+                ctx->block.align = ALIGN_LEFT;
+            }
+            break;
+        case KEY_MIN_WIDTH:
+            sasprintf(&(ctx->block.min_width_str), "%.*s", (int)len, val);
+            break;
+        case KEY_NAME:
+            sasprintf(&(ctx->block.name), "%.*s", (int)len, val);
+            break;
+        case KEY_INSTANCE:
+            sasprintf(&(ctx->block.instance), "%.*s", (int)len, val);
+            break;
+        default:
+            break;
     }
 
     return 1;
@@ -298,33 +354,27 @@ static int stdin_string(void *context, const unsigned char *val, size_t len) {
 static int stdin_integer(void *context, long long val) {
     parser_ctx *ctx = context;
 
-    if (!ctx->last_map_key) {
-        return 0;
-    }
-
-    if (strcasecmp(ctx->last_map_key, "min_width") == 0) {
-        ctx->block.min_width = (uint32_t)val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "separator_block_width") == 0) {
-        ctx->block.sep_block_width = (uint32_t)val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "border_top") == 0) {
-        ctx->block.border_top = (uint32_t)val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "border_right") == 0) {
-        ctx->block.border_right = (uint32_t)val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "border_bottom") == 0) {
-        ctx->block.border_bottom = (uint32_t)val;
-        return 1;
-    }
-    if (strcasecmp(ctx->last_map_key, "border_left") == 0) {
-        ctx->block.border_left = (uint32_t)val;
-        return 1;
+    switch (ctx->key) {
+        case KEY_MIN_WIDTH:
+            ctx->block.min_width = (uint32_t)val;
+            break;
+        case KEY_SEPARATOR_BLOCK_WIDTH:
+            ctx->block.sep_block_width = (uint32_t)val;
+            break;
+        case KEY_BORDER_TOP:
+            ctx->block.border_top = (uint32_t)val;
+            break;
+        case KEY_BORDER_RIGHT:
+            ctx->block.border_right = (uint32_t)val;
+            break;
+        case KEY_BORDER_BOTTOM:
+            ctx->block.border_bottom = (uint32_t)val;
+            break;
+        case KEY_BORDER_LEFT:
+            ctx->block.border_left = (uint32_t)val;
+            break;
+        default:
+            break;
     }
 
     return 1;
@@ -368,12 +418,12 @@ static int stdin_end_map(void *context) {
 
 /*
  * When an array is finished, we have an entire statusline.
- * Copy it from the buffer to the actual statusline.
+ * Move it from the buffer to the actual statusline.
  */
 static int stdin_end_array(void *context) {
-    DLOG("copying statusline_buffer to statusline_head\n");
+    DLOG("moving statusline_buffer to statusline_head\n");
     clear_statusline(&statusline_head, true);
-    copy_statusline(&statusline_buffer, &statusline_head);
+    move_statusline(&statusline_buffer, &statusline_head);
 
     DLOG("dumping statusline:\n");
     struct status_block *current;
@@ -389,45 +439,51 @@ static int stdin_end_array(void *context) {
 /*
  * Helper function to read stdin
  *
- * Returns NULL on EOF.
+ * Returns NULL on EOF. The returned buffer is owned by i3bar and reused for
+ * subsequent reads; callers must not free it.
  *
  */
+static unsigned char *stdin_read_buffer;
+static size_t stdin_read_capacity;
+
 static unsigned char *get_buffer(int fd, int *ret_buffer_len) {
+    if (stdin_read_buffer == NULL) {
+        /* Start big enough for typical status lines to avoid growing the
+         * buffer on every update. */
+        stdin_read_capacity = 4096;
+        stdin_read_buffer = smalloc(stdin_read_capacity + 1);
+    }
+
     int rec = 0;
-    int buffer_len = STDIN_CHUNK_SIZE;
-    unsigned char *buffer = smalloc(buffer_len + 1);
-    buffer[0] = '\0';
     while (1) {
-        const ssize_t n = read(fd, buffer + rec, buffer_len - rec);
+        const ssize_t n = read(fd, stdin_read_buffer + rec, stdin_read_capacity - rec);
         if (n == -1) {
             if (errno == EAGAIN) {
                 /* finish up */
                 break;
             }
             ELOG("read() failed!: %s\n", strerror(errno));
-            FREE(buffer);
             exit(EXIT_FAILURE);
         }
         if (n == 0) {
             ELOG("stdin: received EOF\n");
-            FREE(buffer);
             *ret_buffer_len = -1;
             return NULL;
         }
         rec += n;
 
-        if (rec == buffer_len) {
-            buffer_len += STDIN_CHUNK_SIZE;
-            buffer = srealloc(buffer, buffer_len + 1);
+        if ((size_t)rec == stdin_read_capacity) {
+            /* Grow exponentially instead of by a fixed chunk. */
+            stdin_read_capacity *= 2;
+            stdin_read_buffer = srealloc(stdin_read_buffer, stdin_read_capacity + 1);
         }
     }
-    buffer[rec] = '\0';
-    if (buffer[0] == '\0') {
-        FREE(buffer);
+    stdin_read_buffer[rec] = '\0';
+    if (stdin_read_buffer[0] == '\0') {
         rec = -1;
     }
     *ret_buffer_len = rec;
-    return buffer;
+    return stdin_read_buffer;
 }
 
 static void read_flat_input(char *buffer, int length) {
@@ -469,6 +525,50 @@ static bool read_json_input(unsigned char *input, int length) {
 }
 
 /*
+ * Cheap fingerprint of the last status update. Many status commands only emit
+ * a new line when a value actually changes; in that case the payload is
+ * byte-identical to the previous one and neither the JSON parser nor a full
+ * bar redraw has to run.
+ */
+static uint64_t last_status_hash;
+static size_t last_status_length;
+static bool last_status_hash_valid;
+
+static uint64_t status_hash(const unsigned char *data, size_t length) {
+    /* FNV-1a, 64 bit. */
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= data[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static bool status_payload_unchanged(const unsigned char *buffer, int length) {
+    if (length <= 0) {
+        return false;
+    }
+
+    /* Only remember complete-looking updates: a fragment of a larger JSON
+     * document must never be skipped because it happens to repeat. */
+    const unsigned char last = buffer[length - 1];
+    if (last != ']' && last != '}' && last != ',' && last != '\n' && last != '\r') {
+        return false;
+    }
+
+    const uint64_t hash = status_hash(buffer, (size_t)length);
+    if (last_status_hash_valid && hash == last_status_hash &&
+        (size_t)length == last_status_length) {
+        return true;
+    }
+
+    last_status_hash = hash;
+    last_status_length = (size_t)length;
+    last_status_hash_valid = true;
+    return false;
+}
+
+/*
  * Callbalk for stdin. We read a line from stdin and store the result
  * in statusline
  *
@@ -479,13 +579,16 @@ static void stdin_io_cb(int fd) {
     if (buffer == NULL) {
         return;
     }
+    if (status_payload_unchanged(buffer, rec)) {
+        DLOG("status update unchanged, skipping parse and redraw\n");
+        return;
+    }
     bool has_urgent = false;
     if (status_child.version > 0) {
         has_urgent = read_json_input(buffer, rec);
     } else {
         read_flat_input((char *)buffer, rec);
     }
-    free(buffer);
     draw_bars(has_urgent);
 }
 
@@ -520,7 +623,6 @@ static void stdin_io_first_line_cb(int fd) {
         TAILQ_INSERT_TAIL(&statusline_head, new_block, blocks);
         read_flat_input((char *)buffer, rec);
     }
-    free(buffer);
 }
 
 static bool isempty(char *s) {
@@ -551,32 +653,39 @@ static void ws_stdin_io_cb(int fd) {
         return;
     }
 
-    gchar **strings = g_strsplit((const char *)buffer, "\n", 0);
-    for (int idx = 0; strings[idx] != NULL; idx++) {
-        if (ws_child.pending_line == NULL && isempty(strings[idx])) {
-            /* In the normal case where the buffer ends with '\n', the last
-             * string should be empty */
-            continue;
+    /* Split on newlines in place instead of letting GLib allocate an array
+     * plus a copy of every line. */
+    char *line = (char *)buffer;
+    for (;;) {
+        char *newline = strchr(line, '\n');
+        if (newline == NULL) {
+            /* This is the last (possibly empty) segment. If it is not empty,
+             * we have read incomplete data and save it for later. */
+            if (ws_child.pending_line == NULL && isempty(line)) {
+                break;
+            }
+            char *pending = append_string(ws_child.pending_line, line);
+            free(ws_child.pending_line);
+            ws_child.pending_line = pending;
+            break;
         }
 
-        if (strings[idx + 1] == NULL) {
-            /* This is the last string but it is not empty, meaning that we have
-             * read data that is incomplete, save it for later. */
-            char *new = append_string(ws_child.pending_line, strings[idx]);
-            free(ws_child.pending_line);
-            ws_child.pending_line = new;
+        *newline = '\0';
+        if (ws_child.pending_line == NULL && isempty(line)) {
+            /* In the normal case where the buffer ends with '\n', the trailing
+             * segment is empty. */
+            line = newline + 1;
             continue;
         }
 
         free(ws_last_json);
-        ws_last_json = append_string(ws_child.pending_line, strings[idx]);
+        ws_last_json = append_string(ws_child.pending_line, line);
         FREE(ws_child.pending_line);
 
         parse_workspaces_json((const unsigned char *)ws_last_json, strlen(ws_last_json));
-    }
 
-    g_strfreev(strings);
-    free(buffer);
+        line = newline + 1;
+    }
 
     draw_bars(false);
 }
@@ -780,6 +889,9 @@ void start_child(char *command) {
         .yajl_end_array = stdin_end_array,
     };
     parser = yajl_alloc(&callbacks, NULL, &parser_context);
+    /* Allow multiple values: the status line is a stream of JSON arrays, one
+     * per update. yajl 1 tolerated this implicitly, yajl 2 needs the flag. */
+    yajl_config(parser, yajl_allow_multiple_values, 1);
     gen = yajl_gen_alloc(NULL);
 
     int pipe_in[2];  /* pipe we read from */

@@ -169,6 +169,11 @@ frame 背景像素改用 `client.background` 主题色，消除黑块与残影�
 - 候选不再要求 `con->mapped`：tabbed/stacked 里被隐藏的窗口也能被 Alt+Tab 选中
   （没有预览，退回标题块）；提交时按窗口 id 重新查找容器，避免候选在此期间被关闭的悬垂指针；
   改用 `con_activate()`，浮动窗口会一并置顶。
+- **全浮动工作区修复**：候选收集原先用 `con_is_leaf()` 判断叶子，而只有浮动窗口的
+  workspace 的 `nodes_head` 为空（浮动容器在 `floating_head`），会被误判成叶子并直接
+  返回，导致“所有窗口都浮动时 Alt+Tab 打不开”。现在以 `CT_CON` 作为终止条件，并
+  始终沿 `focus_head`（MRU 顺序，浮动与平铺容器都在其中）递归；实测两个浮动窗口
+  Alt+Tab 能正常显示缩略图与标题栏。
 - Shift 只负责反向循环：按下不再被当作"取消"（`Mod1+Tab` 后再按 Shift 以前会直接关掉面板且不切换），
   松开 Shift 也不再提交；Alt/Meta/Super/Ctrl 松开仍为确认，符合 mangowc 语义。
 - 预览抓图：直接抓窗口可能得到黑图——无合成器时被遮挡区域内容未定义，depth-32 窗口 alpha 为 0
@@ -177,6 +182,130 @@ frame 背景像素改用 `client.background` 主题色，消除黑块与残影�
 - 实测（Chromium 150 / Firefox Nightly / Zen，均在 `--nest` 内）：20 次连续
   Alt+Tab 全部命中预期窗口；快速轻点与按住 Tab 均只走一格；浮动窗口遮挡时
   预览改用屏幕快照，无黑块。
+
+### 8. i3bar 状态栏性能优化（`i3bar/src/*`、`libi3/font.c`）
+
+i3bar 在每次状态更新（默认 1 秒一次）和每次工作区事件时都要重新校准、重绘所有 block，
+是持续存在的小热点。本次从“每次更新/每次绘制”两个维度削减分配与测量：
+
+- **Pango 布局与 cairo 上下文复用**（`libi3/font.c`）：原先 `predict_text_width_pango`
+  和 `draw_text_pango` 每次调用都新建 `cairo_image_surface` + `cairo_t` + `PangoLayout` 并
+  在返回前销毁。现在各保留一个测量布局和一个绘制布局（另加测量用 1×1 surface + cr），
+  仅在字体描述、DPI 或绘制目标 surface 变化时重建（`pango_cache_reset()` 在
+  `free_font()` / `free_font_struct()` 里失效）。文本测量仍用
+  `pango_cairo_update_layout`，返回前 `cairo_new_path()` 避免缓存上下文留下活动路径，
+  以免后续 `cairo_surface_flush()` 报错。i3 核心（窗口标题、边框）共用此代码，同样受益。
+- **状态更新不再逐 block 拷贝**（`i3bar/src/child.c`）：`copy_statusline` 原来把每个
+  `status_block` 连同字符串重新分配、memcpy 一份；改为 `move_statusline()` 用
+  TAILQ_REMOVE/INSERT_TAIL 直接搬运节点，零分配、零拷贝。
+- **JSON key 不再分配字符串**（`i3bar/src/child.c`、`i3bar/src/workspaces.c`）：原来
+  `yajl_map_key` 里 `sstrdup` 每个 key、标量回调里再 `strcmp`、map 结束时 `free`。
+  现在 key 直接映射成编译期 enum（`block_key_t` / `ws_key`），标量回调只做
+  `switch`；比较用长度 + `strncasecmp`/`memcmp`，不分配。未知 key 的处理与原
+  “取消解析”语义一致。
+- **stdin 读取缓冲复用**（`i3bar/src/child.c`）：`get_buffer` 改为持久、按需翻倍的
+  静态缓冲，不再每次 `malloc`/`free`；`ws_stdin_io_cb` 用 `strchr` 原地切分换行，
+  取代 `g_strsplit`/`g_strfreev` 的整块字符串分配。
+- **跨输出共享测量结果**（`i3bar/src/xcb.c`、`i3bar/include/common.h`）：
+  `render_desc` 增加 `text_width` + `width_valid`，`predict_block_length` 只在首次
+  测量并把裸宽度缓存；多显示器时同一次 `draw_bars` 不再对同一 block 重复
+  `predict_text_width`，也不再把 border 宽度重复累加。每次 `draw_bars` 开始时统一
+  失效缓存。
+- **单次 flush**（`i3bar/src/xcb.c`）：`redraw_bars` 在所有输出循环结束后统一
+  `xcb_flush`，避免每个输出一次往返。
+
+> 顺带修复一个上游遗留的 yajl 2 兼容问题：i3bar 按 yajl 1 的“流式多文档”语义编写，
+> 而 yajl 2 在第一个顶层 JSON 文档结束后再喂数据会报 `trailing garbage`，导致
+> **JSON 格式状态命令除第一次更新外全部解析失败**。在 `start_child` 里显式
+> `yajl_config(parser, yajl_allow_multiple_values, 1)`（与 `parse_json_header.c`
+> 已有的 `yajl_allow_trailing_garbage` 一致）。用三帧 JSON（普通 block / pango
+> markup / border + background + min_width + align + short_text）实测，三帧均正确渲染。
+
+### 9. i3 核心渲染与推送路径优化（`src/gaps.c`、`src/render.c`、`src/x.c`、`src/con.c`、`src/animation.c`）
+
+前 1–7 项主要针对动画与布局计算本身，本节处理 `tree_render()` → `x_push_changes()`
+这条每帧必经链路上仍然存在的三类额外开销：重复的全树扫描、线性查找、以及可避免的
+堆分配与 X 请求。
+
+- **gaps 计算按渲染轮次缓存**（`src/gaps.c`、`include/gaps.h`、`src/render.c`）：
+  `calculate_effective_gaps()` 每次都要 `con_num_visible_children()` 遍历整个工作区，
+  而 `render_con()` 对树中每个容器都会调用它（工作区自身 + 每个判断 inset 的容器），
+  单次渲染是 O(n²)。一轮渲染期间树、焦点与配置都不会变化，故新增
+  `gaps_render_cache_begin()` / `gaps_render_cache_end()`，由 `render_con()` 用
+  `render_depth` 在最外层进入/退出时开、关缓存，按工作区缓存 `gaps_t`。
+  同理 `gaps_has_adjacent_container()` 原本每个方向都要调两次
+  `con_get_fullscreen_con()`（每个 inset 容器 4 个方向 = 8 次全树 BFS），现在在缓存
+  生效期间按工作区只查一次全屏容器并复用。
+- **`state_for_frame()` 线性扫描改哈希表**（`src/x.c`）：`x_push_node()`、
+  `set_hidden_state()`、`set_maximized_state()`、`set_shape_state()`、`x_raise_con()`
+  每次推送都会对每个容器查一次 con_state，原实现是 `state_head` 的
+  `CIRCLEQ_FOREACH`，使单次 push 为 O(n²)。新增开放寻址（线性探测、乘法散列、
+  删除用墓碑标记）的 `state_map`，在 `x_con_init()` 插入、`_x_con_kill()` 删除，
+  75% 装载时扩容并重哈希，查询降为均摊 O(1)；`state_head` 保留给需要遍历的旧逻辑。
+- **`con_get_fullscreen_con()` 去掉逐节点 malloc**（`src/con.c`）：原 BFS 每访问一个
+  节点就 `smalloc` 一个 `struct bfs_entry` 并 `free`，而该函数在渲染/inset 判断里被高频
+  调用。改为跨调用复用的静态 `Con *` 队列（容量 64 起、不足翻倍），BFS 顺序不变，
+  每次调用零分配。
+- **渲染临时数组改栈上缓冲**（`src/render.c`）：`precalculate_sizes()` /
+  `precalculate_layout_rects()` 的返回值原来总是 `smalloc`，每渲染每个容器两次堆分配。
+  现在 `render_con()` 提供 `sizes_stack` / `rects_stack`（16 个元素，覆盖绝大多数容器），
+  子容器数不超过该值时直接用栈缓冲、不再分配；超出才回退堆分配，由 `free_params`
+  按 `heap_allocated` 标记释放。
+- **`_NET_FRAME_EXTENTS` 仅在变化时写入**（`src/x.c`）：该 property 只在边框样式变化时
+  才变，但原来每次 push 对每个窗口都无条件 `xcb_change_property`。现在在 `con_state`
+  里缓存上一次的四个值并 `memcmp` 比较，未变则跳过；`x_reinit()`（换了 client window）
+  与 `x_move_win()`（frame 里换了窗口）会置 `frame_extents_valid = false` 强制重发。
+- **动画 tick 单次遍历**（`src/animation.c`）：`animation_tick_cb()` 原本在遍历
+  `all_cons` 处理完所有动画后，再调用一次 `animation_running()` 又整树遍历一遍。
+  现在在 tick 循环内用 `still_running` 记录是否仍有活跃动画，省掉每帧一次全树扫描。
+
+### 10. 帧提交、动画时序与状态栏（本轮）
+
+参考 Clarion 的帧预算与“一帧一次提交”思路，继续削减每帧的 X 请求、堆分配与
+无效工作：
+
+- **事件掩码按需切换**（`src/x.c`）：`x_push_changes()` 原先每次推送都先把所有
+  已映射窗口的 event mask 改成 `SUBSTRUCTURE_REDIRECT`（去掉 EnterWindow），
+  推送完再改回 `FRAME_EVENT_MASK`，即每帧 `2×窗口数` 次
+  `ChangeWindowAttributes`。现在先用一次轻量预扫描判断本次推送是否会重排窗口栈、
+  映射/取消映射窗口（以及图形 resize、tiling drag 临时去掉 EnterWindow 的情况），
+  只有确实需要时才做这两轮全树切换。普通几何动画/焦点/标题变化每帧省掉 2N 个
+  X 请求。
+- **每帧只 flush 一次**（`src/x.c`）：`x_push_node()` 在动画窗口的 pixmap 拷贝与
+  改尺寸前后各调用了一次 `xcb_flush()`，工作区滑动时是每帧 `2×动画窗口数` 次
+  系统调用。X11 请求在连接内保序（服务器一定先拷贝再 resize），因此改为把整帧
+  请求留在同一个缓冲区，由 `x_push_changes()`（或直接调用 `x_push_node()` 的
+  拖拽路径）统一提交，帧的原子性也更好。
+- **热路径复用 con_state**（`src/x.c`）：`set_hidden_state()`、
+  `set_maximized_state()`、`set_shape_state()` 原先每个容器都要再做一次
+  `state_for_frame()` 哈希查找；现在由 `x_push_node()` 把已查到的 `con_state`
+  直接传入，每帧少 3N 次哈希探测。
+- **自适应帧预算**（`src/animation.c`）：帧定时器用“上一帧实际耗时”决定下一次
+  sleep。现在维护一个立即上涨、按 1/16 缓慢衰减的耗时估计（同 Clarion 的 latch
+  budget），避免偶尔一个重帧就把后续整段动画的节拍顶偏；持续的重负载仍会被
+  如实计入。
+- **透明度去重与首帧淡入**（`src/animation.c`、`include/data.h`）：容器记录上次
+  写入的 opacity，值未变化时不再重复写客户端与 frame 的
+  `_NET_WM_WINDOW_OPACITY`；窗口打开动画在开始时立即写入 `opacity_from`，
+  消除“第一帧全不透明、下一帧突然变淡”的闪烁。`x_reinit()` 会失效该缓存。
+  另外新增 `animation_reapply_opacity()`，配置 reload 后立即按新配置重算所有窗口
+  的透明度——之前关闭 `dim_inactive` 或调回 1.0 时，旧窗口会一直停在变暗状态，
+  直到下一次焦点切换。
+- **工作区滑动可中断**（`src/x.c`）：连续快速切换工作区时，新滑动从“当前可见
+  位置”继续，而不是每次都从屏幕外重新开始，切换过程不再跳变。
+- **新增内置缓动曲线**（`src/animation.c`）：`easeOutBack`、`easeInOutBack`、
+  `easeOutCirc`，用于窗口打开/工作区切换的轻微回弹（贝塞尔表达，行为接近
+  Clarion 的 spring 轨迹但不需要额外状态机）。淡入淡出仍把 eased 值夹到
+  `[0,1]`，避免过冲导致透明度钳制后停顿。
+- **i3bar 相同状态更新直接跳过**（`i3bar/src/child.c`）：对完整的状态负载做
+  64 位 FNV-1a 指纹，与上一次完全一致时不解析 JSON、不重建 block、不重绘。
+  只在负载以 `]`/`}`/`,`/换行结尾（完整更新）时记录，避免误跳分片。
+- **i3statusgo 去掉 gopsutil 与子进程**（`i3statusgo/cmd/i3statusgo.go`）：CPU、
+  内存、磁盘、网速、电池全部改为直接读 `/proc`、`/sys` 与 `statfs`；SSID 用
+  `SIOCGIWESSID` ioctl、信号强度读 `/proc/net/wireless`，稳态不再 fork `nmcli`；
+  CPU 采样不再每次创建 goroutine + `time.After`。第三方依赖清零，二进制
+  4.1 MB → 2.0 MB，实测 RSS ≈ 8 MB（原 ≈ 9–11 MB），WiFi 信息按 10 s、本机 IP
+  按 30 s 缓存。
 
 ## 三、性能画像与内存
 
@@ -219,6 +348,13 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
   每次 reload 后把所有 Mod4 键位绑定自动复制一份 Mod1（Alt）变体并一并
   translate/grab——物理 Alt 触发配置里 `$mod`（Super）的键位，配置文件
   零改动，Hyprland 只绑 Super 故零冲突。
+- **按宿主类型自动启用 Alt 别名**：`I3_NEST` 不再无条件设置。启动时先检测
+  宿主会话（`WAYLAND_DISPLAY`/`WAYLAND_SOCKET`/`XDG_SESSION_TYPE`）：
+  - X11 宿主：不生成 Mod1 副本。Xephyr 的 `Ctrl+Shift` 是真正的
+    `XGrabKeyboard`，抓取后宿主 i3 的 Mod4 passive grab 不再生效，嵌套里
+    使用真实的 `$mod` 即可；不再出现“Alt+Return 也能开终端”这类额外别名冲突。
+  - Wayland 宿主：保留 Mod1 副本（compositor 层 Super 无法被 Xephyr 绕过）。
+  启动时会在 stderr 提示 `Ctrl+Shift` 抓取/释放键盘的含义。
 - 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的
   `/usr/local` libxkbcommon（re-exec 前置 `/usr/lib/x86_64-linux-gnu`）。
 - **会话隔离**：子进程额外 `unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设

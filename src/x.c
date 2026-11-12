@@ -72,6 +72,13 @@ typedef struct con_state {
 
     bool initial;
 
+    /* Last _NET_FRAME_EXTENTS value that was pushed to X11. The property only
+     * changes when the border/title configuration changes, but x_push_node()
+     * runs for every container on every render (i.e. at animation frame
+     * rate), so it is cached here. */
+    uint32_t frame_extents[4];
+    bool frame_extents_valid;
+
     char *name;
 
     CIRCLEQ_ENTRY(con_state) state;
@@ -92,6 +99,117 @@ TAILQ_HEAD(initial_mapping_head, con_state) initial_mapping_head =
     TAILQ_HEAD_INITIALIZER(initial_mapping_head);
 
 /*
+ * Maps frame window IDs to their con_state. state_for_frame() is called
+ * several times per container on every push (which happens at animation frame
+ * rate), so scanning state_head linearly made rendering quadratic in the
+ * number of windows. Open addressing with linear probing makes the lookup
+ * O(1) without adding anything to the Con structure.
+ */
+static con_state **state_map = NULL;
+static size_t state_map_capacity = 0;
+/* Number of occupied slots, including tombstones. */
+static size_t state_map_used = 0;
+/* Sentinel for deleted entries (any address that is not a real con_state). */
+static con_state state_map_tombstone;
+
+#define STATE_MAP_MIN_CAPACITY 64
+
+static bool state_map_is_tombstone(const con_state *state) {
+    return state == &state_map_tombstone;
+}
+
+static size_t state_map_slot(xcb_window_t id) {
+    /* Window IDs of one client are often consecutive; multiply by a large odd
+     * constant to spread them over the table. */
+    return (size_t)((id * 2654435761u) & (uint32_t)(state_map_capacity - 1));
+}
+
+static void state_map_resize(size_t new_capacity) {
+    con_state **old_map = state_map;
+    const size_t old_capacity = state_map_capacity;
+
+    state_map_capacity = new_capacity;
+    state_map = scalloc(state_map_capacity, sizeof(con_state *));
+    state_map_used = 0;
+
+    if (old_map == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < old_capacity; i++) {
+        con_state *state = old_map[i];
+        if (state == NULL || state_map_is_tombstone(state)) {
+            continue;
+        }
+        size_t slot = state_map_slot(state->id);
+        while (state_map[slot] != NULL) {
+            slot = (slot + 1) & (state_map_capacity - 1);
+        }
+        state_map[slot] = state;
+        state_map_used++;
+    }
+
+    free(old_map);
+}
+
+static void state_map_insert(con_state *state) {
+    if (state_map == NULL) {
+        state_map_resize(STATE_MAP_MIN_CAPACITY);
+    } else if ((state_map_used + 1) * 4 >= state_map_capacity * 3) {
+        state_map_resize(state_map_capacity * 2);
+    }
+
+    size_t slot = state_map_slot(state->id);
+    while (state_map[slot] != NULL && !state_map_is_tombstone(state_map[slot])) {
+        slot = (slot + 1) & (state_map_capacity - 1);
+    }
+
+    if (state_map[slot] == NULL) {
+        state_map_used++;
+    }
+    state_map[slot] = state;
+}
+
+static void state_map_remove(con_state *state) {
+    if (state_map == NULL) {
+        return;
+    }
+
+    size_t slot = state_map_slot(state->id);
+    for (size_t probe = 0; probe < state_map_capacity; probe++) {
+        con_state *entry = state_map[slot];
+        if (entry == NULL) {
+            return;
+        }
+        if (entry == state) {
+            state_map[slot] = &state_map_tombstone;
+            return;
+        }
+        slot = (slot + 1) & (state_map_capacity - 1);
+    }
+}
+
+static con_state *state_map_lookup(xcb_window_t window) {
+    if (state_map == NULL) {
+        return NULL;
+    }
+
+    size_t slot = state_map_slot(window);
+    for (size_t probe = 0; probe < state_map_capacity; probe++) {
+        con_state *state = state_map[slot];
+        if (state == NULL) {
+            return NULL;
+        }
+        if (!state_map_is_tombstone(state) && state->id == window) {
+            return state;
+        }
+        slot = (slot + 1) & (state_map_capacity - 1);
+    }
+
+    return NULL;
+}
+
+/*
  * Returns the container state for the given frame. This function always
  * returns a container state (otherwise, there is a bug in the code and the
  * container state of a container for which x_con_init() was not called was
@@ -99,11 +217,9 @@ TAILQ_HEAD(initial_mapping_head, con_state) initial_mapping_head =
  *
  */
 static con_state *state_for_frame(xcb_window_t window) {
-    con_state *state;
-    CIRCLEQ_FOREACH (state, &state_head, state) {
-        if (state->id == window) {
-            return state;
-        }
+    con_state *state = state_map_lookup(window);
+    if (state != NULL) {
+        return state;
     }
 
     /* TODO: better error handling? */
@@ -208,6 +324,7 @@ void x_con_init(Con *con) {
     CIRCLEQ_INSERT_HEAD(&state_head, state, state);
     CIRCLEQ_INSERT_HEAD(&old_state_head, state, old_state);
     TAILQ_INSERT_TAIL(&initial_mapping_head, state, initial_mapping_order);
+    state_map_insert(state);
     DLOG("adding new state for window id 0x%08x\n", state->id);
 }
 
@@ -268,7 +385,14 @@ void x_reinit(Con *con) {
     state->initial = true;
     state->child_mapped = false;
     state->con = con;
+    /* The client window set will change, so _NET_FRAME_EXTENTS has to be
+     * pushed again for the new window. */
+    state->frame_extents_valid = false;
     memset(&(state->window_rect), 0, sizeof(Rect));
+
+    /* The client window is new, so the opacity cache of the container does not
+     * describe it. */
+    con->anim.opacity_applied_valid = false;
 }
 
 /*
@@ -306,6 +430,8 @@ void x_move_win(Con *src, Con *dest) {
 
     state_dest->con = state_src->con;
     state_src->con = NULL;
+    /* A different client window ends up in the destination frame. */
+    state_dest->frame_extents_valid = false;
 
     if (rect_equals(state_dest->window_rect, (Rect){0, 0, 0, 0})) {
         memcpy(&(state_dest->window_rect), &(state_src->window_rect), sizeof(Rect));
@@ -326,6 +452,7 @@ static void _x_con_kill(Con *con) {
     CIRCLEQ_REMOVE(&state_head, state, state);
     CIRCLEQ_REMOVE(&old_state_head, state, old_state);
     TAILQ_REMOVE(&initial_mapping_head, state, initial_mapping_order);
+    state_map_remove(state);
     FREE(state->name);
     free(state);
 
@@ -942,12 +1069,11 @@ void x_deco_recurse(Con *con) {
  * Sets or removes the _NET_WM_STATE_HIDDEN property on con if necessary.
  *
  */
-static void set_hidden_state(Con *con) {
+static void set_hidden_state(Con *con, con_state *state) {
     if (con->window == NULL) {
         return;
     }
 
-    con_state *state = state_for_frame(con->frame.id);
     bool should_be_hidden = con_is_hidden(con);
     if (should_be_hidden == state->is_hidden) {
         return;
@@ -968,12 +1094,10 @@ static void set_hidden_state(Con *con) {
  * Sets or removes _NET_WM_STATE_MAXIMIZE_{HORZ, VERT} on con
  *
  */
-static void set_maximized_state(Con *con) {
+static void set_maximized_state(Con *con, con_state *state) {
     if (!con->window) {
         return;
     }
-
-    con_state *state = state_for_frame(con->frame.id);
 
     const bool con_maximized_horz = con_is_maximized(con, HORIZ);
     if (con_maximized_horz != state->is_maximized_horz) {
@@ -1157,14 +1281,8 @@ static void x_unshape_frame(Con *con, xcb_shape_sk_t shape_kind) {
 /*
  * Shape or unshape container frame based on the con state.
  */
-static void set_shape_state(Con *con, bool need_reshape) {
+static void set_shape_state(Con *con, con_state *state, bool need_reshape) {
     if (!shape_supported || con->window == NULL) {
-        return;
-    }
-
-    con_state *state;
-    if ((state = state_for_frame(con->frame.id)) == NULL) {
-        ELOG("window state for con %p not found\n", con);
         return;
     }
 
@@ -1227,8 +1345,14 @@ void x_push_node(Con *con) {
         const anim_rect layout_rect = animation_rect_from_layout(con->rect);
 
         if (con->anim.slide_pending) {
-            anim_rect from = layout_rect;
-            from.x += con->anim.slide_dx;
+            /* When the workspace is switched again while a slide is still
+             * running, continue from the currently visible position instead
+             * of restarting from the target's off-screen position. This keeps
+             * rapid workspace switches continuous instead of jumping. */
+            anim_rect from = con->anim.active ? con->anim.cur : layout_rect;
+            if (!con->anim.active) {
+                from.x += con->anim.slide_dx;
+            }
             con->anim.slide_pending = false;
             animation_begin(con, from, layout_rect, config.animation_workspace_curve,
                             config.animation_workspace_duration / 1000.0, false);
@@ -1431,11 +1555,12 @@ void x_push_node(Con *con) {
         }
 
         DLOG("setting rect (%d, %d, %d, %d)\n", rect.x, rect.y, rect.width, rect.height);
-        /* flush to ensure that the following commands are sent in a single
-         * buffer and will be processed directly afterwards (the contents of a
-         * window get lost when resizing it, therefore we want to provide it as
-         * fast as possible) */
-        xcb_flush(conn);
+        /* The pixmap copy and the resize are ordered in the X11 request stream,
+         * so the server always copies first and resizes afterwards. Keeping all
+         * requests of one frame in the same buffer (flushed once by
+         * x_push_changes() / the caller) avoids two round trips per animated
+         * window per frame, which is what used to make workspace slides and
+         * drags expensive. */
         xcb_set_window_rect(conn, con->frame.id, rect);
         if (con->frame_buffer.id != XCB_NONE) {
             /* Keep the frame's cairo surface metadata in sync with the actual
@@ -1445,7 +1570,6 @@ void x_push_node(Con *con) {
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
             con->frame_dirty = false;
         }
-        xcb_flush(conn);
 
         memcpy(&(state->rect), &rect, sizeof(Rect));
         fake_notify = true;
@@ -1469,29 +1593,37 @@ void x_push_node(Con *con) {
         }
     }
 
-    set_shape_state(con, need_reshape);
+    set_shape_state(con, state, need_reshape);
 
     /* Rounded corners, Hyprland-style. This has to happen after
      * set_shape_state() so that our shape wins over the one derived from a
      * shaped client window. */
     x_apply_rounding(con, state);
 
-    /* Set _NET_FRAME_EXTENTS according to the actual decoration size. */
-    if (con != NULL && con->window != NULL) {
+    /* Set _NET_FRAME_EXTENTS according to the actual decoration size. The
+     * value only changes when the border style changes, so the push to X11 is
+     * skipped when it is unchanged (this runs for every container on every
+     * render). */
+    if (con->window != NULL) {
         Rect bsr = con_border_style_rect(con);
-        Rect r = {
+        const uint32_t extents[4] = {
             bsr.x,                 /* left */
             0 - bsr.width - bsr.x, /* right */
             bsr.y,                 /* top */
             0 - bsr.height - bsr.y /* bottom */
         };
-        xcb_change_property(
-            conn,
-            XCB_PROP_MODE_REPLACE,
-            con->window->id,
-            A__NET_FRAME_EXTENTS,
-            XCB_ATOM_CARDINAL, 32, 4,
-            &r);
+        if (!state->frame_extents_valid ||
+            memcmp(extents, state->frame_extents, sizeof(extents)) != 0) {
+            xcb_change_property(
+                conn,
+                XCB_PROP_MODE_REPLACE,
+                con->window->id,
+                A__NET_FRAME_EXTENTS,
+                XCB_ATOM_CARDINAL, 32, 4,
+                extents);
+            memcpy(state->frame_extents, extents, sizeof(extents));
+            state->frame_extents_valid = true;
+        }
     }
 
     /* Map if map state changed, also ensure that the child window
@@ -1531,7 +1663,6 @@ void x_push_node(Con *con) {
             draw_util_copy_surface(&(con->frame_buffer), &(con->frame), 0, 0, 0, 0, con->rect.width, con->rect.height);
             con->frame_dirty = false;
         }
-        xcb_flush(conn);
 
         DLOG("mapping container %08x (serial %d)\n", con->frame.id, cookie.sequence);
         state->mapped = con->mapped;
@@ -1545,8 +1676,8 @@ void x_push_node(Con *con) {
         fake_absolute_configure_notify(con);
     }
 
-    set_hidden_state(con);
-    set_maximized_state(con);
+    set_hidden_state(con, state);
+    set_maximized_state(con, state);
 
     /* Handle all children and floating windows of this node. We recurse
      * in focus order to display the focused client in a stack first when
@@ -1623,6 +1754,45 @@ static bool is_con_attached(Con *con) {
 }
 
 /*
+ * Whether this push can restack, map or unmap a frame, or whether an external
+ * caller (graphical resize, tiling drag) has temporarily removed the
+ * EnterWindow mask. Only in those cases the two full-tree
+ * ChangeWindowAttributes passes are needed. Geometry animations, focus and
+ * title changes leave the masks untouched, so pushing two requests per mapped
+ * window on every animation frame would be pure overhead.
+ */
+static bool event_masks_relaxed = false;
+
+static bool push_needs_event_mask_relax(void) {
+    if (event_masks_relaxed) {
+        return true;
+    }
+
+    con_state *state;
+    CIRCLEQ_FOREACH (state, &state_head, state) {
+        if (state->initial) {
+            return true;
+        }
+        /* state->con is only set for containers that currently own a client
+         * window (see x_reinit()); non-window frames never get mapped. */
+        Con *con = state->con;
+        if (con != NULL) {
+            if (state->mapped != con->mapped) {
+                return true;
+            }
+            if (con->mapped && con->window != NULL && !state->child_mapped) {
+                return true;
+            }
+        }
+        if (CIRCLEQ_PREV(state, state) != CIRCLEQ_PREV(state, old_state)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
  * Pushes all changes (state of each node, see x_push_node() and the window
  * stack) to X11.
  *
@@ -1642,14 +1812,20 @@ void x_push_changes(Con *con) {
         pointercookie = xcb_query_pointer(conn, root);
     }
 
+    const bool relax_event_masks = push_needs_event_mask_relax();
+
     DLOG("-- PUSHING WINDOW STACK --\n");
     /* We need to keep SubstructureRedirect around, otherwise clients can send
      * ConfigureWindow requests and get them applied directly instead of having
-     * them become ConfigureRequests that i3 handles. */
+     * them become ConfigureRequests that i3 handles. The EnterWindow mask is
+     * removed temporarily so that restacking does not generate EnterNotify
+     * events which would confuse focus handling. */
     uint32_t values[1] = {XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT};
-    CIRCLEQ_FOREACH_REVERSE (state, &state_head, state) {
-        if (state->mapped) {
-            xcb_change_window_attributes(conn, state->id, XCB_CW_EVENT_MASK, values);
+    if (relax_event_masks) {
+        CIRCLEQ_FOREACH_REVERSE (state, &state_head, state) {
+            if (state->mapped) {
+                xcb_change_window_attributes(conn, state->id, XCB_CW_EVENT_MASK, values);
+            }
         }
     }
     bool order_changed = false;
@@ -1742,11 +1918,14 @@ void x_push_changes(Con *con) {
         warp_to = NULL;
     }
 
-    values[0] = FRAME_EVENT_MASK;
-    CIRCLEQ_FOREACH_REVERSE (state, &state_head, state) {
-        if (state->mapped) {
-            xcb_change_window_attributes(conn, state->id, XCB_CW_EVENT_MASK, values);
+    if (relax_event_masks) {
+        values[0] = FRAME_EVENT_MASK;
+        CIRCLEQ_FOREACH_REVERSE (state, &state_head, state) {
+            if (state->mapped) {
+                xcb_change_window_attributes(conn, state->id, XCB_CW_EVENT_MASK, values);
+            }
         }
+        event_masks_relaxed = false;
     }
 
     x_deco_recurse(con);
@@ -1919,6 +2098,10 @@ void x_set_warp_to(Rect *rect) {
  */
 void x_mask_event_mask(uint32_t mask) {
     uint32_t values[] = {FRAME_EVENT_MASK & mask};
+    /* Remember that the masks were modified outside of a push, so that the
+     * next x_push_changes() restores FRAME_EVENT_MASK even if nothing else
+     * changed. */
+    event_masks_relaxed = (values[0] & XCB_EVENT_MASK_ENTER_WINDOW) == 0;
 
     con_state *state;
     CIRCLEQ_FOREACH_REVERSE (state, &state_head, state) {

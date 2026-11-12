@@ -484,6 +484,19 @@ static void nest_run(void) {
     if (i3_pid == 0) {
         /* child: run i3 on the nested display. Xephyr is started by the
          * parent in parallel; wait for it to accept connections. */
+        /* Detect the host session type before hiding the Wayland socket. On a
+         * Wayland host the compositor handles Super bindings before XWayland,
+         * so Xephyr's XGrabKeyboard cannot bypass them: the nested instance
+         * keeps the Mod1 alias bindings. On an X11 host the Ctrl+Shift grab
+         * really hands the keyboard over to Xephyr, so the real $mod works and
+         * the Alt aliases are unnecessary (and would only invent conflicts). */
+        const char *wayland_display = getenv("WAYLAND_DISPLAY");
+        const char *wayland_socket = getenv("WAYLAND_SOCKET");
+        const char *session_type = getenv("XDG_SESSION_TYPE");
+        const bool host_wayland =
+            (wayland_display != NULL && *wayland_display != '\0') ||
+            (wayland_socket != NULL && *wayland_socket != '\0') ||
+            (session_type != NULL && strcasecmp(session_type, "wayland") == 0);
         setenv("DISPLAY", disparg, 1);
         /* Programs started from the nested instance must not talk to the host
          * session: when WAYLAND_DISPLAY is set (the usual case when i3 runs
@@ -508,10 +521,20 @@ static void nest_run(void) {
         if (access(sockfile, F_OK) != 0) {
             errx(EXIT_FAILURE, "nest mode: Xephyr did not start on :%d", nest_display);
         }
-        /* Mark this instance so that reloads re-duplicate the Mod4 bindings
-         * (see duplicate_bindings_for_nest_mode()). */
-        setenv("I3_NEST", "1", 1);
-        LOG("nest mode: running on :%d\n", nest_display);
+        /* Only Wayland hosts need the Mod4 -> Mod1 alias, see above. */
+        if (host_wayland) {
+            setenv("I3_NEST", "1", 1);
+        } else {
+            unsetenv("I3_NEST");
+        }
+        LOG("nest mode: running on :%d (host session: %s, Alt alias %s)\n",
+            nest_display, host_wayland ? "Wayland" : "X11",
+            host_wayland ? "enabled" : "disabled");
+        fprintf(stderr,
+                "nest mode: press Ctrl+Shift inside the Xephyr window to grab/release the keyboard.%s\n",
+                host_wayland
+                    ? " The host compositor may still consume its own Super bindings."
+                    : " $mod bindings work while the keyboard is grabbed.");
         return;
     }
 

@@ -95,7 +95,10 @@ animation <类型>, <开关>, <时长 ms>, <曲线名>
 ```
 
 - 内置贝塞尔曲线：`default`、`linear`、`easeOutCubic`、`easeOutQuint`、
-  `easeOutExpo`、`easeInOutCubic`、`easeInOutQuint`、`easeInOutSine`。
+  `easeOutExpo`、`easeOutBack`、`easeInOutBack`、`easeOutCirc`、
+  `easeInOutCubic`、`easeInOutQuint`、`easeInOutSine`。
+  其中 `easeOutBack` / `easeInOutBack` 会轻微过冲（适合窗口打开、工作区切换），
+  淡入淡出仍会自动夹到 `[0,1]`。
   可用 `bezier` 自定义（最多 16 条，同名覆盖）。
 - `animation` 类型（大小写不敏感）：
 

@@ -10,6 +10,39 @@
  */
 #include "all.h"
 
+/*
+ * render_con() asks for the effective gaps of every container in the tree, and
+ * calculating them walks the whole workspace (con_num_visible_children()) each
+ * time. That made a render pass quadratic in the number of containers, which
+ * is expensive because renders happen at animation frame rate. During one
+ * render pass the tree, the focus and the configuration cannot change, so the
+ * result is cached per workspace. The cache is enabled only while a render
+ * pass is running (see gaps_render_cache_begin()).
+ */
+static struct {
+    bool active;
+    bool valid;
+    Con *workspace;
+    gaps_t gaps;
+
+    /* Cached fullscreen lookup for the workspace of the last query, used by
+     * gaps_has_adjacent_container(). */
+    Con *fullscreen_workspace;
+    Con *fullscreen;
+} gaps_cache;
+
+void gaps_render_cache_begin(void) {
+    gaps_cache.active = true;
+    gaps_cache.valid = false;
+    gaps_cache.workspace = NULL;
+    gaps_cache.fullscreen_workspace = NULL;
+    gaps_cache.fullscreen = NULL;
+}
+
+void gaps_render_cache_end(void) {
+    gaps_cache.active = false;
+}
+
 /**
  * Calculates the effective gap sizes for a container.
  */
@@ -19,27 +52,30 @@ gaps_t calculate_effective_gaps(Con *con) {
         return (gaps_t){0, 0, 0, 0, 0};
     }
 
+    if (gaps_cache.active && gaps_cache.valid && gaps_cache.workspace == workspace) {
+        return gaps_cache.gaps;
+    }
+
     bool one_child = con_num_visible_children(workspace) <= 1 ||
                      (con_num_children(workspace) == 1 &&
                       (TAILQ_FIRST(&(workspace->nodes_head))->layout == L_TABBED ||
                        TAILQ_FIRST(&(workspace->nodes_head))->layout == L_STACKED));
 
-    if (config.smart_gaps == SMART_GAPS_ON && one_child) {
-        return (gaps_t){0, 0, 0, 0, 0};
+    gaps_t gaps = {0, 0, 0, 0, 0};
+    if (!(config.smart_gaps == SMART_GAPS_ON && one_child)) {
+        gaps.inner = workspace->gaps.inner + config.gaps.inner;
+        if (config.smart_gaps != SMART_GAPS_INVERSE_OUTER || one_child) {
+            gaps.top = workspace->gaps.top + config.gaps.top;
+            gaps.right = workspace->gaps.right + config.gaps.right;
+            gaps.bottom = workspace->gaps.bottom + config.gaps.bottom;
+            gaps.left = workspace->gaps.left + config.gaps.left;
+        }
     }
 
-    gaps_t gaps = {
-        .inner = (workspace->gaps.inner + config.gaps.inner),
-        .top = 0,
-        .right = 0,
-        .bottom = 0,
-        .left = 0};
-
-    if (config.smart_gaps != SMART_GAPS_INVERSE_OUTER || one_child) {
-        gaps.top = workspace->gaps.top + config.gaps.top;
-        gaps.right = workspace->gaps.right + config.gaps.right;
-        gaps.bottom = workspace->gaps.bottom + config.gaps.bottom;
-        gaps.left = workspace->gaps.left + config.gaps.left;
+    if (gaps_cache.active) {
+        gaps_cache.valid = true;
+        gaps_cache.workspace = workspace;
+        gaps_cache.gaps = gaps;
     }
 
     return gaps;
@@ -94,9 +130,25 @@ bool gaps_should_inset_con(Con *con, int children) {
  */
 bool gaps_has_adjacent_container(Con *con, direction_t direction) {
     Con *workspace = con_get_workspace(con);
-    Con *fullscreen = con_get_fullscreen_con(workspace, CF_GLOBAL);
-    if (fullscreen == NULL) {
-        fullscreen = con_get_fullscreen_con(workspace, CF_OUTPUT);
+    Con *fullscreen;
+
+    if (gaps_cache.active) {
+        if (gaps_cache.fullscreen_workspace != workspace) {
+            gaps_cache.fullscreen_workspace = workspace;
+            gaps_cache.fullscreen = NULL;
+            if (workspace != NULL) {
+                gaps_cache.fullscreen = con_get_fullscreen_con(workspace, CF_GLOBAL);
+                if (gaps_cache.fullscreen == NULL) {
+                    gaps_cache.fullscreen = con_get_fullscreen_con(workspace, CF_OUTPUT);
+                }
+            }
+        }
+        fullscreen = gaps_cache.fullscreen;
+    } else {
+        fullscreen = con_get_fullscreen_con(workspace, CF_GLOBAL);
+        if (fullscreen == NULL) {
+            fullscreen = con_get_fullscreen_con(workspace, CF_OUTPUT);
+        }
     }
 
     /* If this container is fullscreen by itself, there's no adjacent container. */

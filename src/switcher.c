@@ -78,10 +78,7 @@ static void collect_candidates(Con *con, Con *workspace) {
         return;
     }
 
-    if (con_is_leaf(con)) {
-        if (con->type != CT_CON || con->window == NULL) {
-            return;
-        }
+    if (con->type == CT_CON && con->window != NULL) {
         if (con->window->dock != W_NODOCK) {
             return;
         }
@@ -103,8 +100,12 @@ static void collect_candidates(Con *con, Con *workspace) {
         return;
     }
 
-    /* focus_head is most-recently-focused first (see con_focus()), so walking
-     * it in order yields the global MRU order of leaves. */
+    /* Recurse in MRU order. This must not stop at con_is_leaf(con): a
+     * workspace that only contains floating windows has an empty nodes_head
+     * (the floating containers live in floating_head), so it looks like a leaf
+     * even though it has children. Walking focus_head covers tiling and
+     * floating children alike (both are inserted into focus_head on attach),
+     * which is what makes Alt+Tab work when every window is floating. */
     Con *child;
     TAILQ_FOREACH (child, &(con->focus_head), focused) {
         collect_candidates(child, workspace);

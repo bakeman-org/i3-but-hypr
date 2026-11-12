@@ -15,13 +15,35 @@
 #include <yajl/yajl_parse.h>
 
 /* A datatype to pass through the callbacks to save the state */
+enum ws_key {
+    WS_KEY_NONE = 0,
+    WS_KEY_ID,
+    WS_KEY_NUM,
+    WS_KEY_NAME,
+    WS_KEY_OUTPUT,
+    WS_KEY_VISIBLE,
+    WS_KEY_FOCUSED,
+    WS_KEY_URGENT,
+    WS_KEY_RECT,
+    WS_KEY_X,
+    WS_KEY_Y,
+    WS_KEY_WIDTH,
+    WS_KEY_HEIGHT,
+};
+
 struct workspaces_json_params {
     struct ws_head *workspaces;
     i3_ws *workspaces_walk;
-    char *cur_key;
+    enum ws_key key;
+    bool have_key;
     bool need_output;
     bool parsing_rect;
 };
+
+/* Case-sensitive comparison of a JSON key without allocating a string. */
+static bool ws_key_is(const unsigned char *key, size_t len, const char *name) {
+    return len == strlen(name) && memcmp(key, name, len) == 0;
+}
 
 /*
  * Parse a boolean value (visible, focused, urgent)
@@ -30,27 +52,22 @@ struct workspaces_json_params {
 static int workspaces_boolean_cb(void *params_, const int val) {
     struct workspaces_json_params *params = params_;
 
-    if (!strcmp(params->cur_key, "visible")) {
-        params->workspaces_walk->visible = val;
-        FREE(params->cur_key);
-        return 1;
+    switch (params->key) {
+        case WS_KEY_VISIBLE:
+            params->workspaces_walk->visible = val;
+            break;
+        case WS_KEY_FOCUSED:
+            params->workspaces_walk->focused = val;
+            break;
+        case WS_KEY_URGENT:
+            params->workspaces_walk->urgent = val;
+            break;
+        default:
+            return 0;
     }
 
-    if (!strcmp(params->cur_key, "focused")) {
-        params->workspaces_walk->focused = val;
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    if (!strcmp(params->cur_key, "urgent")) {
-        params->workspaces_walk->urgent = val;
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    FREE(params->cur_key);
-
-    return 0;
+    params->have_key = false;
+    return 1;
 }
 
 /*
@@ -60,41 +77,25 @@ static int workspaces_boolean_cb(void *params_, const int val) {
 static int workspaces_integer_cb(void *params_, const long long val) {
     struct workspaces_json_params *params = params_;
 
-    if (!strcmp(params->cur_key, "id")) {
-        params->workspaces_walk->id = val;
-        FREE(params->cur_key);
-        return 1;
+    switch (params->key) {
+        case WS_KEY_ID:
+            params->workspaces_walk->id = val;
+            break;
+        case WS_KEY_NUM:
+            params->workspaces_walk->num = (int)val;
+            break;
+        /* rect is unused, so we don't bother to save it */
+        case WS_KEY_X:
+        case WS_KEY_Y:
+        case WS_KEY_WIDTH:
+        case WS_KEY_HEIGHT:
+            break;
+        default:
+            return 0;
     }
 
-    if (!strcmp(params->cur_key, "num")) {
-        params->workspaces_walk->num = (int)val;
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    /* rect is unused, so we don't bother to save it */
-    if (!strcmp(params->cur_key, "x")) {
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    if (!strcmp(params->cur_key, "y")) {
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    if (!strcmp(params->cur_key, "width")) {
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    if (!strcmp(params->cur_key, "height")) {
-        FREE(params->cur_key);
-        return 1;
-    }
-
-    FREE(params->cur_key);
-    return 0;
+    params->have_key = false;
+    return 1;
 }
 
 /*
@@ -104,7 +105,7 @@ static int workspaces_integer_cb(void *params_, const long long val) {
 static int workspaces_string_cb(void *params_, const unsigned char *val, const size_t len) {
     struct workspaces_json_params *params = params_;
 
-    if (!strcmp(params->cur_key, "name")) {
+    if (params->key == WS_KEY_NAME) {
         const char *ws_name = (const char *)val;
         params->workspaces_walk->canonical_name = sstrndup(ws_name, len);
 
@@ -144,12 +145,12 @@ static int workspaces_string_cb(void *params_, const unsigned char *val, const s
              i3string_as_utf8(params->workspaces_walk->name),
              params->workspaces_walk->name_width,
              i3string_get_num_glyphs(params->workspaces_walk->name));
-        FREE(params->cur_key);
 
+        params->have_key = false;
         return 1;
     }
 
-    if (!strcmp(params->cur_key, "output")) {
+    if (params->key == WS_KEY_OUTPUT) {
         /* We add the ws to the TAILQ of the output, it belongs to */
         char *output_name = NULL;
         sasprintf(&output_name, "%.*s", (int)len, val);
@@ -163,8 +164,8 @@ static int workspaces_string_cb(void *params_, const unsigned char *val, const s
 
         params->need_output = false;
         FREE(output_name);
-        FREE(params->cur_key);
 
+        params->have_key = false;
         return 1;
     }
 
@@ -178,15 +179,16 @@ static int workspaces_string_cb(void *params_, const unsigned char *val, const s
 static int workspaces_start_map_cb(void *params_) {
     struct workspaces_json_params *params = params_;
 
-    if (params->cur_key == NULL) {
+    if (params->have_key) {
+        params->parsing_rect = true;
+        params->have_key = false;
+    } else {
         i3_ws *new_workspace = scalloc(1, sizeof(i3_ws));
         new_workspace->num = -1;
 
         params->workspaces_walk = new_workspace;
         params->need_output = true;
         params->parsing_rect = false;
-    } else {
-        params->parsing_rect = true;
     }
 
     return 1;
@@ -239,8 +241,36 @@ static int workspaces_end_map_cb(void *params_) {
  */
 static int workspaces_map_key_cb(void *params_, const unsigned char *keyVal, const size_t keyLen) {
     struct workspaces_json_params *params = params_;
-    FREE(params->cur_key);
-    sasprintf(&params->cur_key, "%.*s", (int)keyLen, keyVal);
+
+    if (ws_key_is(keyVal, keyLen, "id")) {
+        params->key = WS_KEY_ID;
+    } else if (ws_key_is(keyVal, keyLen, "num")) {
+        params->key = WS_KEY_NUM;
+    } else if (ws_key_is(keyVal, keyLen, "name")) {
+        params->key = WS_KEY_NAME;
+    } else if (ws_key_is(keyVal, keyLen, "output")) {
+        params->key = WS_KEY_OUTPUT;
+    } else if (ws_key_is(keyVal, keyLen, "visible")) {
+        params->key = WS_KEY_VISIBLE;
+    } else if (ws_key_is(keyVal, keyLen, "focused")) {
+        params->key = WS_KEY_FOCUSED;
+    } else if (ws_key_is(keyVal, keyLen, "urgent")) {
+        params->key = WS_KEY_URGENT;
+    } else if (ws_key_is(keyVal, keyLen, "rect")) {
+        params->key = WS_KEY_RECT;
+    } else if (ws_key_is(keyVal, keyLen, "x")) {
+        params->key = WS_KEY_X;
+    } else if (ws_key_is(keyVal, keyLen, "y")) {
+        params->key = WS_KEY_Y;
+    } else if (ws_key_is(keyVal, keyLen, "width")) {
+        params->key = WS_KEY_WIDTH;
+    } else if (ws_key_is(keyVal, keyLen, "height")) {
+        params->key = WS_KEY_HEIGHT;
+    } else {
+        params->key = WS_KEY_NONE;
+    }
+
+    params->have_key = true;
     return 1;
 }
 
@@ -286,7 +316,6 @@ void parse_workspaces_json(const unsigned char *json, const size_t size) {
     }
 
     yajl_free(handle);
-    FREE(params.cur_key);
 }
 
 /*

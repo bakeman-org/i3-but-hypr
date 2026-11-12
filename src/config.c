@@ -353,6 +353,7 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         regrab_all_buttons(conn);
         gaps_reapply_workspace_assignments();
         x_update_frame_backgrounds();
+        animation_reapply_opacity();
 
         /* Redraw the currently visible decorations on reload, so that the
          * possibly new drawing parameters changed. */

@@ -22,4 +22,6 @@ For information about contributing to i3, please see [CONTRIBUTING.md](.github/C
 - mangowc
 - niri
 - kde
+- clarion
 - codebuddy
+
