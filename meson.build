@@ -324,6 +324,7 @@ cairo_dep = dependency('cairo', version: '>=1.14.4', method: 'pkg-config')
 pangocairo_dep = dependency('pangocairo', method: 'pkg-config')
 glib_dep = dependency('glib-2.0', method: 'pkg-config')
 gobject_dep = dependency('gobject-2.0', method: 'pkg-config')
+lua_dep = dependency('lua5.4', version: '>=5.4', method: 'pkg-config')
 
 ev_dep = cc.find_library('ev')
 
@@ -398,6 +399,7 @@ i3srcs = [
   'src/floating.c',
   'src/gaps.c',
   'src/handlers.c',
+  'src/i3ext.c',
   'src/ipc.c',
   'src/key_press.c',
   'src/load_layout.c',
@@ -488,6 +490,7 @@ common_deps = [
   pangocairo_dep,
   glib_dep,
   gobject_dep,
+  lua_dep,
   ev_dep,
   config_h,
 ]
@@ -711,6 +714,20 @@ executable(
   dependencies: common_deps,
   link_with: libi3,
 )
+
+i3ext_scan_test = executable(
+  'test.i3ext_scan',
+  [
+    'testcases/i3ext_scan.c',
+    'src/i3ext.c',
+  ],
+  include_directories: inc,
+  c_args: '-DI3EXT_SCAN_TEST',
+  dependencies: common_deps,
+  link_with: libi3,
+)
+
+test('i3ext_scan', i3ext_scan_test)
 
 anyevent_i3 = custom_target(
   'anyevent-i3',

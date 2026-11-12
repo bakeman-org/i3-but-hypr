@@ -1387,3 +1387,16 @@ CFGFUN(scroller_default_proportion_single, const char *value) {
 CFGFUN(scroller_autofit, const char *value) {
     config.scroller_autofit = boolstr(value);
 }
+
+/*
+ * Internal marker for a top-level `i3ext { ... }` block. The block is
+ * executed in its original position so that later native directives still
+ * override it (and vice versa).
+ *
+ */
+CFGFUN(i3ext_exec, const long index) {
+    DLOG("i3ext: executing block %ld\n", index);
+    if (!i3ext_run(index)) {
+        result->has_errors = true;
+    }
+}

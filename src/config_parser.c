@@ -622,6 +622,20 @@ static bool try_chdir(const char *path) {
     return result;
 }
 
+/*
+ * Returns whether the given (1-based) line number is part of a top-level
+ * i3ext block. Set/variable processing must not touch Lua source.
+ *
+ */
+static bool line_in_i3ext_ranges(int line, const I3ExtLineRange *ranges, size_t num_ranges) {
+    for (size_t i = 0; i < num_ranges; i++) {
+        if (line >= ranges[i].start_line && line <= ranges[i].end_line) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static parse_file_result_t parse_file_inner(struct parser_ctx *ctx, const char *f, IncludedFile *included_file) {
     if (!try_chdir(f)) {
         return PARSE_FILE_FAILED;
@@ -650,20 +664,47 @@ static parse_file_result_t parse_file_inner(struct parser_ctx *ctx, const char *
     }
     rewind(fstr);
 
+    /* Pass A: locate top-level i3ext blocks on the raw contents. The line
+     * ranges are needed to keep set/variable processing away from Lua. */
+    I3ExtLineRange *i3ext_ranges = NULL;
+    size_t i3ext_num_ranges = 0;
+    bool preprocess_errors = false;
+    if (!i3ext_find_blocks(included_file->raw_contents, f,
+                           &i3ext_ranges, &i3ext_num_ranges)) {
+        preprocess_errors = true;
+    }
+
     char buffer[4096], key[512], value[4096], *continuation = NULL;
     bool invalid_sets = false;
     char *buf = scalloc(stbuf.st_size + 1, 1);
+    int file_line = 1;
     while (!feof(fstr)) {
+        char *read_start = continuation ? continuation : buffer;
         if (!continuation) {
             continuation = buffer;
         }
-        if (fgets(continuation, sizeof(buffer) - (continuation - buffer), fstr) == NULL) {
+        if (fgets(read_start, sizeof(buffer) - (read_start - buffer), fstr) == NULL) {
             if (feof(fstr)) {
                 break;
             }
             fclose(fstr);
             return PARSE_FILE_FAILED;
         }
+        const int this_line = file_line;
+        for (char *walk = read_start; *walk != '\0'; walk++) {
+            if (*walk == '\n') {
+                file_line++;
+            }
+        }
+
+        /* Lua source inside i3ext must be copied verbatim: no set detection,
+         * no line continuations and no variable rewriting. */
+        if (line_in_i3ext_ranges(this_line, i3ext_ranges, i3ext_num_ranges)) {
+            strcpy(buf + strlen(buf), buffer);
+            continuation = NULL;
+            continue;
+        }
+
         if (buffer[strlen(buffer) - 1] != '\n' && !feof(fstr)) {
             ELOG("Your line continuation is too long, it exceeds %zd bytes\n", sizeof(buffer));
         }
@@ -813,16 +854,37 @@ static parse_file_result_t parse_file_inner(struct parser_ctx *ctx, const char *
         }
     }
 
+    /* Keep the unprocessed (but variable-replaced) contents for IPC
+     * get_config, so that users still see their `i3ext { ... }` block. */
     included_file->variable_replaced_contents = sstrdup(new);
+
+    /* Pass B: extract the Lua source and replace each block with an internal
+     * marker that keeps the original position (and line count). */
+    char *parse_buffer = new;
+    bool free_parse_buffer = false;
+    if (!preprocess_errors && i3ext_num_ranges > 0) {
+        parse_buffer = i3ext_preprocess(new, f, &preprocess_errors);
+        if (parse_buffer == NULL) {
+            preprocess_errors = true;
+            parse_buffer = new;
+        } else {
+            free_parse_buffer = true;
+        }
+    }
 
     struct context *context = scalloc(1, sizeof(struct context));
     context->filename = f;
-    parse_config(ctx, new, context);
-    if (ctx->has_errors) {
+    if (preprocess_errors) {
+        ctx->has_errors = true;
         context->has_errors = true;
-    }
+    } else {
+        parse_config(ctx, parse_buffer, context);
+        if (ctx->has_errors) {
+            context->has_errors = true;
+        }
 
-    check_for_duplicate_bindings(context);
+        check_for_duplicate_bindings(context);
+    }
 
     if (ctx->use_nagbar && (context->has_errors || context->has_warnings || invalid_sets)) {
         ELOG("FYI: You are using i3 version %s\n", i3_version);
@@ -833,8 +895,12 @@ static parse_file_result_t parse_file_inner(struct parser_ctx *ctx, const char *
 
     FREE(context->line_copy);
     free(context);
+    if (free_parse_buffer) {
+        free(parse_buffer);
+    }
     free(new);
     free(buf);
+    free(i3ext_ranges);
 
     if (has_errors) {
         return PARSE_FILE_CONFIG_ERRORS;

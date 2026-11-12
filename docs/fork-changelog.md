@@ -129,6 +129,44 @@ Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scra
 - 限制：`dropdown` 标记不参与 restart/load_layout 持久化，重启后窗口退化为普通
   scratchpad 窗口。
 
+### 7. `i3ext { ... }` Lua 配置块（`src/i3ext.c`、`include/i3ext.h`，全新文件）
+
+把 fork 专属的外观/动画/下拉/布局参数和扩展键位从 i3 配置命名空间中独立出来，
+放进一个顶层 Lua 5.4 配置块；块外只保留上游 i3 指令、上游命令键位和外部工具键位。
+
+- 嵌入系统 Lua 5.4（meson 依赖 `lua5.4 >= 5.4`）；`i3 -C` 会实际执行并校验
+  块内 Lua。每个块使用独立、沙箱化的 state：只加载 base/table/string/math/utf8，
+  移除 `os`、`io`、`package`、`debug`、`require`、`load`、`loadfile`、`dofile`、
+  `loadstring`、`collectgarbage`、`print`。
+- 两阶段预处理：Pass A 在原始文件上定位块行范围，避免块内的 `set`/续行被变量
+  处理误改；Pass B 在变量替换后的 buffer 上抽取 Lua、替换为内部
+  `__i3ext_exec <id>` 标记并保持行号。块按原位置执行，维持“后写覆盖”语义，
+  include 和多个块均支持。
+- Lua-aware 扫描器理解单/双引号字符串与转义、`--` 行注释、`--[[...]]` /
+  `--[=[...]=]` 长注释、`[[...]]` / `[=[...]=]` 长字符串、任意层嵌套表、CRLF。
+  块必须顶层、开括号在 `i3ext` 行末、闭括号独占一行。
+- 新增 `binds` 列表：fork 扩展键位也迁入块内，复用 `configure_binding()`
+  直接注册。`key` 按最后一个 `+` 拆成修饰键与键名/键码，支持
+  `release = true` 和 `type = "bindcode"`（最后一段为数字键码）。
+  `binds` 在固定顺序中最先应用；与原生 `bindsym` 重复时由
+  `check_for_duplicate_bindings()` 检出并使 `i3 -C` 失败。首版不支持
+  criteria 前缀和 mode 内键位，这类绑定继续使用原生写法。
+- 两阶段应用：先校验未知字段/类型/范围/枚举/十六进制颜色，再按固定顺序调用
+  既有 `cfg_*` setter：**binds** → gaps → decoration → opacity → titlebar →
+  client.background → client.colors → client.gradients → animations → dropdown
+  → layouts。未知键和类型/范围错误是致命错误，使 `i3 -C` 失败。
+- `animations.<类型>` 的 `duration` 省略时沿用原值（不清零），`enabled = false`
+  可关闭单个类型；`open`/`close` 分别映射 `windowsIn`/`windowsOut`，
+  `fade_in` 映射 `fadeIn`；曲线先注册后应用。
+- `layouts.scroller.ignore_proportion_single` 映射到内部取反后的
+  `cfg_scroller_proportion_single`；`layouts.master.orientation` 是 i3ext 新增
+  能力，直接写 `config.master_orientation`。
+- IPC `get_config` 的 `raw_contents` / `variable_replaced_contents` 仍返回用户
+  写入的 `i3ext { ... }`，不会暴露内部标记。
+- 原生 fork 指令全部保留，可继续使用；两者混用时按出现顺序后者覆盖。
+  详细语法、完整 schema、沙箱与错误定位见
+  `docs/hyprland-mangowc-config.zh.md`。
+
 ## 二、性能优化（本次）
 
 渲染路径是 fork 的性能关键：动画开启时 `tree_render()` 以 60 Hz 运行，

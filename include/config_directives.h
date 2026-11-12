@@ -146,3 +146,4 @@ CFGFUN(scroller_prefer_overspread, const char *value);
 CFGFUN(scroller_proportion_single, const char *value);
 CFGFUN(scroller_default_proportion_single, const char *value);
 CFGFUN(scroller_autofit, const char *value);
+CFGFUN(i3ext_exec, const long index);

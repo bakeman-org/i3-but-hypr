@@ -3,6 +3,181 @@
 本文档描述本分支在标准 i3 配置语法之上移植的 Hyprland 与 mangowc 风格特性，
 包括最终的配置指令（config directives）与运行时命令（commands）。
 
+## 零、`i3ext { ... }`：Lua 配置块
+
+本分支把 fork 专属的外观、动画、下拉窗口和布局参数集中到一个顶层配置块中。
+块内是**真正的 Lua 5.4**，由内嵌的 Lua 解释器执行：
+
+```lua
+i3ext {
+    gaps = { inner = 8, outer = 0 },
+    decoration = { rounding = 8, border_size = 2 },
+}
+```
+
+### 语法规则
+
+- `i3ext` 必须是顶层块，不能写在 `bar { ... }` 或 `mode ... { ... }` 内。
+- 开括号 `{` 必须是 `i3ext` 行最后一个非空白字符；闭括号 `}` 必须独占一行
+  （其后只允许空白或 `--` 注释）。不支持单行块。
+- 字段之间必须用逗号；注释必须使用 Lua 的 `--`，不能用 `#`。
+- 变量替换（`set $foo ...`）照常生效，块内也可以写 `$foo`。
+- 块按出现位置执行：块后的原生指令覆盖块内设置，块后的 `i3ext` 块也会覆盖
+  前一个块；与旧配置的“后写覆盖”语义一致。
+- 每个块拥有独立、沙箱化的 Lua state，块之间不共享全局变量。
+- 块本身是一个 Lua table 表达式（编译为一次 `i3ext { ... }` 调用）；字段值可以用
+  Lua 表达式（算术、字符串拼接、函数调用等），但不能在 table 构造器内部写
+  `local`、`if`、`for` 等语句。
+
+### 沙箱
+
+块内只能使用 `base`、`table`、`string`、`math`、`utf8`。以下内容被移除：
+`os`、`io`、`package`、`debug`、`require`、`load`、`loadfile`、`dofile`、
+`loadstring`、`collectgarbage`、`print`。块内可以调用全局函数
+`i3ext(table)`（配置块本身会被编译为一次 `i3ext { ... }` 调用）。
+
+### 扩展键位 `binds`
+
+fork 扩展键位也写在块内；块外只保留上游 i3 配置、上游命令键位和外部工具键位：
+
+```lua
+binds = {
+    { key = "Mod4+Shift+t", command = "titlebar toggle" },
+    { key = "Mod4+Ctrl+1", command = "snap top-left" },
+    { key = "Mod1+Tab", command = "switcher next" },
+    { key = "Mod4+d", command = "exec dmenu_run", release = true },
+}
+```
+
+- `key` 是完整字符串，按**最后一个** `+` 拆成修饰键和键名/键码：
+  `Mod4+Shift+t` → modifiers `Mod4+Shift`、key `t`。
+- `command` 原样交给 i3 命令解析器。
+- `release = true` 对应原生 `bindsym --release`。
+- 可选 `type = "bindcode"`，此时 `key` 的最后一段必须是数字键码
+  （如 `Mod4+24`）；默认 `type = "bindsym"`。
+- 首版不支持 criteria 前缀和 mode 内键位，这类绑定继续使用原生 `bindsym`。
+- `binds` 在固定顺序中**最先**应用；与原生 `bindsym` 重复时由
+  `check_for_duplicate_bindings()` 报告并使 `i3 -C` 失败。
+- 原生写法示例（留在块外）：`bindsym $mod+u border toggle`、
+  `bindsym $mod+Return exec st`、`bindsym $mod+j focus left`。
+
+### 完整 schema
+
+所有字段均可省略：
+
+```lua
+i3ext {
+    binds = {
+        { key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
+        { key = "Mod4+Shift+backslash", command = "dropdown recall" },
+        { key = "Mod4+Shift+t", command = "titlebar toggle" },
+    },
+    gaps = {
+        inner = 8,
+        outer = 0,
+        -- 可选：horizontal / vertical / top / right / bottom / left
+    },
+    decoration = {
+        rounding = 8,              -- 0..100
+        border_size = 2,           -- 0..100
+    },
+    opacity = {
+        active = 1.0,              -- 0.0..1.0
+        inactive = 0.92,           -- 0.0..1.0
+        dim_inactive = true,
+        dim_strength = 0.10,       -- 0.0..1.0
+    },
+    titlebar = {
+        align = "center",          -- left | center | right
+        height = 20,               -- 0..200
+        padding = 4,               -- 0..100
+        font = "pango:monospace 24",
+        visibility = "normal",     -- normal | none
+    },
+    client = {
+        background = "#11111b",    -- #rrggbb 或 #rrggbbaa
+        colors = {
+            -- border / background / text / indicator / child_border
+            focused = { "#1e1e2e", "#1414b0ff", "#cdd6f4", "#f9e2af", "#1e1e2e" },
+            focused_inactive = { "#181825", "#010156ff", "#bac2de", "#313244", "#181825" },
+            unfocused = { "#181825", "#810639ff", "#9399b2", "#313244", "#181825" },
+            urgent = { "#11111b", "#11111b", "#f38ba8", "#f38ba8", "#f38ba8" },
+        },
+        gradients = {
+            -- start / end / angle（角度可省略，默认 45）
+            focused = { "#adecc9ff", "#561ac5ff", 45 },
+            focused_inactive = { "#313244", "#0b0bb3ff", 45 },
+            unfocused = { "#313244", "#9f08c9ff", 45 },
+            urgent = { "#f38ba8", "#ff5555", 90 },
+        },
+    },
+    animations = {
+        enabled = true,
+        beziers = {
+            myQuint = { 0.23, 1.0, 0.32, 1.0 },
+        },
+        windows = { duration = 180, curve = "myQuint" },
+        open = { duration = 220, curve = "easeOutQuint" },
+        close = { duration = 150, curve = "easeOutQuint" },
+        fade_in = true,
+        workspaces = { duration = 300, curve = "easeOutQuint" },
+        dropdown = { duration = 250, curve = "easeOutQuint" },
+    },
+    dropdown = {
+        height = 0.40,             -- 0.1..1.0
+        position = "top",          -- top | bottom
+    },
+    layouts = {
+        master = { ratio = 0.6, orientation = "left" },   -- left|right|top|bottom
+        dwindle = { split_ratio = 0.5 },                  -- 0.1..0.9
+        scroller = {
+            proportion = 0.9,                  -- 0.1..1.0
+            structs = 20,                      -- 0..1000 px
+            focus_center = false,
+            prefer_center = false,
+            prefer_overspread = true,
+            ignore_proportion_single = true,
+            default_proportion_single = 1.0,   -- 0.1..1.0
+            autofit = true,
+        },
+    },
+}
+```
+
+约定：
+
+- `animations.<类型>`：`duration` 省略时沿用当前配置值（不会清零）；
+  `enabled = false` 关闭该类型；`open` 映射到 `windowsIn`，`close` 映射到
+  `windowsOut`，`fade_in` 映射到 `fadeIn`。贝塞尔曲线先注册、后应用动画。
+- `layouts.scroller.ignore_proportion_single` 对应旧原生指令的
+  `scroller_ignore_proportion_single`（内部取反后存入
+  `scroller_proportion_single`）。
+- 应用顺序固定为：`binds` → `gaps` → `decoration` → `opacity` → `titlebar` →
+  `client.background` → `client.colors` → `client.gradients` → `animations` →
+  `dropdown` → `layouts`，因此与顺序相关的副作用稳定可复现。
+
+### 错误与校验
+
+- `i3 -C` 会执行并校验块内的 Lua；未知字段、类型错误、范围错误、Lua 语法错误
+  和沙箱越界都会使校验失败。
+- Lua 语法/运行时错误精确到 `文件名:行号`，例如：
+  `~/.config/i3/config:225: attempt to index a nil value (global 'os')`。
+- schema 校验错误包含完整路径，例如
+  `~/.config/i3/config:225: i3ext.dropdown.height: expected number`；
+  由于 Lua 无法提供表字段的源码行号，这类错误定位到 `i3ext` 块起始行，
+  字段路径已足以定位问题。
+- 热重载会先在子进程中校验；校验失败时保留旧配置。
+
+### 与原生指令的关系
+
+旧的原生 fork 指令（`gaps_in`、`rounding`、`border_size`、
+`active_opacity`、`titlebar_*`、`client.*_gradient`、`animations`、`bezier`、
+`animation`、`dropdown_height`、`dropdown_position`、`master_ratio`、
+`dwindle_split_ratio`、`scroller_*` 等）仍然保留并可继续使用。两者可以混用，
+按出现顺序后者覆盖前者。新配置推荐统一使用 `i3ext`：fork 扩展设置与键位都在
+块内，块外只保留上游 i3 配置、上游命令键位和外部工具键位；上游命令键位以及
+带 criteria / mode 的 fork 键位仍写在原生配置中。
+
 ## 一、外观类配置指令
 
 ### 间距（Hyprland 风格别名）
@@ -186,13 +361,19 @@ dropdown recall [<position>,<height>,<width>,<align>]   # 召回最近隐藏的�
   把它变成下拉面板；再按一次收起。GPUI/终端/浏览器等都可以。
   下面的绑定即可覆盖原来 quake-term 的两条规则：
 
-```text
-# 当前焦点窗口：普通窗口直接转换并显示；收起下拉前用 dmenu 确认
-bindsym $mod+backslash exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle
-
-# 召回最近隐藏的下拉窗口（可连续用于多个应用）
-bindsym $mod+Shift+backslash dropdown recall
+```lua
+i3ext {
+    binds = {
+        -- 当前焦点窗口：普通窗口直接转换并显示；收起下拉前用 dmenu 确认
+        { key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
+        -- 召回最近隐藏的下拉窗口（可连续用于多个应用）
+        { key = "Mod4+Shift+backslash", command = "dropdown recall" },
+    },
+}
 ```
+
+原生 `bindsym` 仍可绑定同样的命令，但本 fork 推荐把扩展键位写在 `i3ext.binds`；
+块外只保留上游 i3 和外部工具键位。
 
 - `~/.config/i3/bin/i3-dropdown-toggle` 是 `$mod+\` 使用的确认助手（Python 3 标准库）：
   焦点窗口是可见下拉时，用 dmenu 询问 `Hide dropdown?`（Yes/No），只有选择 Yes
@@ -313,33 +494,37 @@ layoutmsg proportion <+0.05 / -0.05>  # 仅 scroller，相对调整焦点列占�
 layoutmsg cyclenext
 ```
 
-绑定示例：
+绑定示例（推荐写在 `i3ext.binds`）：
 
-```text
-bindsym $mod+m layout master
-bindsym $mod+t layout dwindle
-bindsym $mod+s layout scroller
-bindsym $mod+g layoutmsg swapwithmaster
-bindsym $mod+o layoutmsg focusmaster
-bindsym $mod+y layoutmsg togglesplit
-bindsym $mod+equal layoutmsg proportion +0.05
-bindsym $mod+minus layoutmsg proportion -0.05
-bindsym $mod+c centerwindow
-
-# 浮动窗口贴边（平铺时自动退化为 focus 移动）
-bindsym $mod+Left snap left
-bindsym $mod+Right snap right
-bindsym $mod+Up snap up
-bindsym $mod+Down snap down
-
-# 可选：直接贴四角
-bindsym $mod+ctrl+Left snap top-left
-bindsym $mod+ctrl+Right snap bottom-right
-
-# Alt+Tab 缩略图切换器
-bindsym Mod1+Tab switcher next
-bindsym Mod1+Shift+Tab switcher prev
+```lua
+i3ext {
+    binds = {
+        { key = "Mod4+m", command = "layout master" },
+        { key = "Mod4+t", command = "layout dwindle" },
+        { key = "Mod4+s", command = "layout scroller" },
+        { key = "Mod4+g", command = "layoutmsg swapwithmaster" },
+        { key = "Mod4+o", command = "layoutmsg focusmaster" },
+        { key = "Mod4+y", command = "layoutmsg togglesplit" },
+        { key = "Mod4+equal", command = "layoutmsg proportion +0.05" },
+        { key = "Mod4+minus", command = "layoutmsg proportion -0.05" },
+        { key = "Mod4+c", command = "centerwindow" },
+        -- 浮动窗口贴边（平铺时自动退化为 focus 移动）
+        { key = "Mod4+Left", command = "snap left" },
+        { key = "Mod4+Right", command = "snap right" },
+        { key = "Mod4+Up", command = "snap up" },
+        { key = "Mod4+Down", command = "snap down" },
+        -- 可选：直接贴四角
+        { key = "Mod4+Ctrl+Left", command = "snap top-left" },
+        { key = "Mod4+Ctrl+Right", command = "snap bottom-right" },
+        -- Alt+Tab 缩略图切换器
+        { key = "Mod1+Tab", command = "switcher next" },
+        { key = "Mod1+Shift+Tab", command = "switcher prev" },
+    },
+}
 ```
+
+原生 `bindsym` 仍可直接绑定这些命令（例如在旧配置或 include 文件中），
+但本 fork 推荐统一放在 `i3ext.binds`。
 
 ## 五、默认值与热重载
 

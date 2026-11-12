@@ -21,6 +21,7 @@ state INITIAL:
   'set	'                                  -> IGNORE_LINE
   'set_from_resource'                      -> IGNORE_LINE
   'include'                                -> INCLUDE
+  '__i3ext_exec'                           -> I3EXT_EXEC
   bindtype = 'bindsym', 'bindcode', 'bind' -> BINDING
   'bar'                                    -> BARBRACE
   'font'                                   -> FONT
@@ -962,3 +963,8 @@ state CLIENT_GRADIENT_UNFOCUSED:
 state CLIENT_GRADIENT_URGENT:
   spec = string
       -> call cfg_client_gradient_urgent($spec)
+
+# Internal marker substituted for a top-level i3ext { ... } block.
+state I3EXT_EXEC:
+  index = number
+      -> call cfg_i3ext_exec(&index)

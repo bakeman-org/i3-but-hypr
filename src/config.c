@@ -312,6 +312,10 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     TAILQ_INSERT_TAIL(&included_files, file, files);
 
     LOG("Parsing configfile %s\n", resolved_path);
+    /* Drop the Lua chunks of the previous configuration; they are
+     * re-registered while the new configuration (and its includes) is
+     * parsed. */
+    i3ext_registry_reset();
     struct stack stack = {0};
     struct parser_ctx ctx = {
         .use_nagbar = (load_type != C_VALIDATE),
