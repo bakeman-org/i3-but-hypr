@@ -335,6 +335,10 @@ static void nest_run(void) {
         /* child: run i3 on the nested display. Xephyr is started by the
          * parent in parallel; wait for it to accept connections. */
         setenv("DISPLAY", disparg, 1);
+        /* Drop the host i3's IPC socket path so that this instance gets its
+         * own socket, otherwise it refuses to start with "Socket is already
+         * in use". */
+        unsetenv("I3SOCK");
         for (int i = 0; i < 100; i++) {
             if (access(sockfile, F_OK) == 0) {
                 break;
