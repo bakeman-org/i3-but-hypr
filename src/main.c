@@ -328,6 +328,133 @@ static void nest_ensure_system_libs(void) {
     err(EXIT_FAILURE, "execve(/proc/self/exe)");
 }
 
+/* Private runtime directory and D-Bus socket of the nested session. */
+static char nest_runtimedir[64];
+static char nest_buspath[80];
+static pid_t nest_bus_pid = 0;
+
+/* Called via atexit in the nested instance: stop the private session bus
+ * and remove the private runtime directory. */
+static void nest_cleanup_runtime(void) {
+    if (nest_runtimedir[0] == '\0') {
+        return;
+    }
+    char pidfile[96];
+    snprintf(pidfile, sizeof(pidfile), "%s/dbus.pid", nest_runtimedir);
+    pid_t pid = nest_bus_pid;
+    if (pid <= 0) {
+        FILE *f = fopen(pidfile, "r");
+        if (f != NULL) {
+            if (fscanf(f, "%d", &pid) != 1 || pid <= 0) {
+                pid = 0;
+            }
+            fclose(f);
+        }
+    }
+    if (pid > 0) {
+        kill(pid, SIGTERM);
+    }
+    unlink(pidfile);
+    if (nest_buspath[0] != '\0') {
+        unlink(nest_buspath);
+    }
+    rmdir(nest_runtimedir);
+}
+
+/* Isolate the nested session from the host's runtime services by pointing
+ * XDG_RUNTIME_DIR at a private directory and running a private D-Bus
+ * session bus. Besides hiding the host Wayland socket, this is required
+ * because Firefox-based browsers (e.g. Zen) register their single-instance
+ * service ("org.mozilla.zen") on the session bus: with the host bus visible,
+ * launching such a browser inside the nest merely forwards the command line
+ * to the host instance and the window opens on the host desktop instead of
+ * inside Xephyr. */
+static void nest_isolate_session(void) {
+    char hostrt[32];
+    snprintf(hostrt, sizeof(hostrt), "/run/user/%d", getuid());
+
+    snprintf(nest_runtimedir, sizeof(nest_runtimedir), "/tmp/i3-nest-%d-rt", nest_display);
+    snprintf(nest_buspath, sizeof(nest_buspath), "%s/bus", nest_runtimedir);
+
+    /* Remove stale leftovers of a crashed previous run: they would make
+     * bind(2) and the pidfile fail. */
+    unlink(nest_buspath);
+    rmdir(nest_runtimedir);
+
+    if (mkdir(nest_runtimedir, 0700) != 0) {
+        if (errno == EEXIST) {
+            chmod(nest_runtimedir, 0700);
+        } else {
+            LOG("nest mode: cannot create runtime dir %s (%s), keeping host session services\n",
+                nest_runtimedir, strerror(errno));
+            return;
+        }
+    }
+    setenv("XDG_RUNTIME_DIR", nest_runtimedir, 1);
+    atexit(nest_cleanup_runtime);
+
+    /* Audio sockets are no longer found via XDG_RUNTIME_DIR, so point
+     * PulseAudio/PipeWire clients at the host sockets directly. */
+    char sock[96];
+    snprintf(sock, sizeof(sock), "%s/pulse/native", hostrt);
+    if (access(sock, F_OK) == 0) {
+        snprintf(sock, sizeof(sock), "unix:%s/pulse/native", hostrt);
+        setenv("PULSE_SERVER", sock, 0);
+    }
+    setenv("PIPEWIRE_RUNTIME_DIR", hostrt, 0);
+
+    pid_t bus_pid = fork();
+    if (bus_pid == -1) {
+        LOG("nest mode: fork for dbus-daemon failed, keeping host session bus\n");
+        return;
+    }
+    if (bus_pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull != -1) {
+            dup2(devnull, STDOUT_FILENO);
+        }
+        char addr[128];
+        snprintf(addr, sizeof(addr), "unix:path=%s", nest_buspath);
+        execlp("dbus-daemon", "dbus-daemon", "--session", "--nofork",
+               "--address", addr, (char *)NULL);
+        _exit(127);
+    }
+    nest_bus_pid = bus_pid;
+    int bus_status;
+    for (int i = 0; i < 50; i++) {
+        if (access(nest_buspath, F_OK) == 0) {
+            break;
+        }
+        if (waitpid(bus_pid, &bus_status, WNOHANG) == bus_pid) {
+            /* dbus-daemon exited (e.g. not installed): fall back. */
+            nest_bus_pid = 0;
+            break;
+        }
+        usleep(20000);
+    }
+    if (nest_bus_pid == 0 || access(nest_buspath, F_OK) != 0) {
+        if (nest_bus_pid > 0) {
+            kill(bus_pid, SIGTERM);
+            nest_bus_pid = 0;
+        }
+        LOG("nest mode: private session bus did not start, keeping host session bus\n");
+        return;
+    }
+    /* Remember the bus pid so that cleanup still works after an in-place
+     * restart of i3 (atexit handlers are lost across execve). */
+    char pidfile[96];
+    snprintf(pidfile, sizeof(pidfile), "%s/dbus.pid", nest_runtimedir);
+    FILE *f = fopen(pidfile, "w");
+    if (f != NULL) {
+        fprintf(f, "%d\n", (int)bus_pid);
+        fclose(f);
+    }
+    char addr[128];
+    snprintf(addr, sizeof(addr), "unix:path=%s", nest_buspath);
+    setenv("DBUS_SESSION_BUS_ADDRESS", addr, 1);
+    LOG("nest mode: private session bus on %s\n", nest_buspath);
+}
+
 /* Spawn Xephyr, re-run ourselves on the nested display and wait for it.
  * In the child process, returns so that normal startup continues; the
  * parent process never returns. */
@@ -371,6 +498,7 @@ static void nest_run(void) {
          * own socket, otherwise it refuses to start with "Socket is already
          * in use". */
         unsetenv("I3SOCK");
+        nest_isolate_session();
         for (int i = 0; i < 100; i++) {
             if (access(sockfile, F_OK) == 0) {
                 break;
