@@ -61,6 +61,59 @@ binds = {
 - 原生写法示例（留在块外）：`bindsym $mod+u border toggle`、
   `bindsym $mod+Return exec st`、`bindsym $mod+j focus left`。
 
+### 配色主题 `theme` / `themes` / `bar`
+
+可以把多套 palette 定义在块内，并用一行 `theme` 切换。主题同时覆盖窗口
+titlebar/border 与 i3bar 颜色：
+
+```lua
+theme = "gruber_darker",      -- 省略时默认为 gruber_darker
+themes = {
+    gruber_darker = {
+        client = {
+            background = "#181818",
+            colors = {
+                focused = { "#73d936", "#282828", "#e4e4e4", "#ffdd33", "#73d936" },
+                -- focused_inactive / unfocused / urgent ...
+            },
+            gradients = {
+                focused = { "#73d936", "#96a6c8", 45 },
+                -- ...
+            },
+        },
+        bar = {
+            background = "#181818",
+            statusline = "#e4e4e4",
+            separator = "#282828",
+            focused_workspace = { "#73d936", "#73d936", "#181818" },
+            active_workspace = { "#282828", "#282828", "#e4e4e4" },
+            inactive_workspace = { "#181818", "#181818", "#95a99f" },
+            urgent_workspace = { "#f43841", "#f43841", "#181818" },
+            binding_mode = { "#ffdd33", "#ffdd33", "#181818" },
+        },
+    },
+    -- md3 / onedark / dracula / catppuccin_mocha ...
+},
+```
+
+- `themes` 中的每个主题只允许 `client`、`bar` 两个键；`client` 与顶层
+  `client` 形状相同（background / colors / gradients），`bar` 支持
+  `background`、`statusline`、`separator`、`focused_background`、
+  `focused_statusline`、`focused_separator`，以及 `focused_workspace`、
+  `active_workspace`、`inactive_workspace`、`urgent_workspace`、
+  `binding_mode` 三元组（border / background / text）。
+- 只要定义了 `themes` 且省略 `theme`，就使用默认主题 `gruber_darker`；
+  默认主题未定义或 `theme` 指向不存在的主题都会使 `i3 -C` 失败。
+- 所有主题都会被完整校验（未知键、类型、颜色格式），不只是当前选中的主题。
+- i3bar 配色会应用到 `barconfigs` 中的**所有** bar 配置；因此原生的
+  `bar { ... }` 块必须写在 `i3ext` 之前，且必须存在 bar 配置，否则报错。
+- 顶层 `client` / `bar` 仍然支持，作为主题之后的覆盖项。应用顺序为：
+  `binds` → 主题 `client` → 主题 `bar` → `gaps` → `decoration` → `opacity`
+  → `titlebar` → 顶层 `client` → 顶层 `bar` → `animations` → `dropdown`
+  → `layouts`。
+- 用户配置内置示例主题：`gruber_darker`（默认）、`md3`、`onedark`、
+  `dracula`、`catppuccin_mocha`。切换整套配色只需修改 `theme` 一行。
+
 ### 完整 schema
 
 所有字段均可省略：
@@ -71,6 +124,21 @@ i3ext {
         { key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
         { key = "Mod4+Shift+backslash", command = "dropdown recall" },
         { key = "Mod4+Shift+t", command = "titlebar toggle" },
+    },
+    theme = "gruber_darker",        -- 可选；定义 themes 时默认 gruber_darker
+    themes = {
+        gruber_darker = {
+            client = {
+                background = "#181818",
+                colors = { focused = { "#73d936", "#282828", "#e4e4e4", "#ffdd33", "#73d936" } },
+                gradients = { focused = { "#73d936", "#96a6c8", 45 } },
+            },
+            bar = { background = "#181818", focused_workspace = { "#73d936", "#73d936", "#181818" } },
+        },
+    },
+    bar = {
+        -- 顶层 bar 覆盖主题；字段同 themes.<name>.bar
+        statusline = "#e4e4e4",
     },
     gaps = {
         inner = 8,
@@ -152,9 +220,9 @@ i3ext {
 - `layouts.scroller.ignore_proportion_single` 对应旧原生指令的
   `scroller_ignore_proportion_single`（内部取反后存入
   `scroller_proportion_single`）。
-- 应用顺序固定为：`binds` → `gaps` → `decoration` → `opacity` → `titlebar` →
-  `client.background` → `client.colors` → `client.gradients` → `animations` →
-  `dropdown` → `layouts`，因此与顺序相关的副作用稳定可复现。
+- 应用顺序固定为：`binds` → 主题 `client` → 主题 `bar` → `gaps` →
+  `decoration` → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` →
+  `animations` → `dropdown` → `layouts`，因此与顺序相关的副作用稳定可复现。
 
 ### 错误与校验
 

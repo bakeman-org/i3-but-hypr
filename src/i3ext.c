@@ -551,8 +551,8 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
  ******************************************************************************/
 
 static const char *const i3ext_top_keys[] = {
-    "binds", "gaps", "decoration", "opacity", "titlebar", "client",
-    "animations", "dropdown", "layouts"};
+    "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
+    "titlebar", "client", "animations", "dropdown", "layouts"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -565,6 +565,18 @@ static const char *const i3ext_opacity_keys[] = {"active", "inactive", "dim_inac
 static const char *const i3ext_titlebar_keys[] = {"align", "height", "padding", "font", "visibility"};
 static const char *const i3ext_client_keys[] = {"background", "colors", "gradients"};
 static const char *const i3ext_client_states[] = {"focused", "focused_inactive", "unfocused", "urgent"};
+static const char *const i3ext_theme_keys[] = {"client", "bar"};
+static const char *const i3ext_bar_single_keys[] = {
+    "background", "statusline", "separator",
+    "focused_background", "focused_statusline", "focused_separator"};
+static const char *const i3ext_bar_triple_keys[] = {
+    "focused_workspace", "active_workspace", "inactive_workspace",
+    "urgent_workspace", "binding_mode"};
+static const char *const i3ext_bar_keys[] = {
+    "background", "statusline", "separator",
+    "focused_background", "focused_statusline", "focused_separator",
+    "focused_workspace", "active_workspace", "inactive_workspace",
+    "urgent_workspace", "binding_mode"};
 static const char *const i3ext_animations_keys[] = {
     "enabled", "beziers", "windows", "open", "close", "fade_in",
     "workspaces", "dropdown"};
@@ -788,6 +800,162 @@ static void i3ext_validate_animation_type(lua_State *L, int idx, const char *pat
     i3ext_get_bool(L, idx, "enabled", field_path, &enabled);
 }
 
+#define I3EXT_DEFAULT_THEME "gruber_darker"
+
+static void i3ext_validate_bar_triple(lua_State *L, int idx, const char *path) {
+    idx = lua_absindex(L, idx);
+    if (!lua_istable(L, idx)) {
+        luaL_error(L, "%s: expected table { border, background, text }", path);
+    }
+    if (lua_rawlen(L, idx) != 3) {
+        luaL_error(L, "%s: expected exactly 3 colors", path);
+    }
+    for (int i = 1; i <= 3; i++) {
+        char element_path[384];
+        snprintf(element_path, sizeof(element_path), "%s[%d]", path, i);
+        lua_geti(L, idx, i);
+        i3ext_check_hex_element(L, -1, element_path);
+        lua_pop(L, 1);
+    }
+}
+
+static void i3ext_validate_bar(lua_State *L, int idx, const char *path) {
+    idx = lua_absindex(L, idx);
+    if (!lua_istable(L, idx)) {
+        luaL_error(L, "%s: expected table", path);
+    }
+    i3ext_check_keys(L, idx, path, i3ext_bar_keys, I3EXT_ARRAY_LEN(i3ext_bar_keys));
+
+    char sub[384];
+    for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_bar_single_keys); i++) {
+        snprintf(sub, sizeof(sub), "%s.%s", path, i3ext_bar_single_keys[i]);
+        i3ext_get_hex(L, idx, i3ext_bar_single_keys[i], sub);
+    }
+    for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_bar_triple_keys); i++) {
+        snprintf(sub, sizeof(sub), "%s.%s", path, i3ext_bar_triple_keys[i]);
+        if (i3ext_get_table(L, idx, i3ext_bar_triple_keys[i], sub)) {
+            i3ext_validate_bar_triple(L, -1, sub);
+            lua_pop(L, 1);
+        }
+    }
+}
+
+static void i3ext_validate_client(lua_State *L, int idx, const char *path) {
+    idx = lua_absindex(L, idx);
+    if (!lua_istable(L, idx)) {
+        luaL_error(L, "%s: expected table", path);
+    }
+    i3ext_check_keys(L, idx, path, i3ext_client_keys, I3EXT_ARRAY_LEN(i3ext_client_keys));
+
+    char sub[384];
+    snprintf(sub, sizeof(sub), "%s.background", path);
+    i3ext_get_hex(L, idx, "background", sub);
+
+    snprintf(sub, sizeof(sub), "%s.colors", path);
+    if (i3ext_get_table(L, idx, "colors", sub)) {
+        const int colors = lua_absindex(L, -1);
+        i3ext_check_keys(L, colors, sub, i3ext_client_states,
+                         I3EXT_ARRAY_LEN(i3ext_client_states));
+        for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_client_states); i++) {
+            char state_path[420];
+            snprintf(state_path, sizeof(state_path), "%s.%s", sub, i3ext_client_states[i]);
+            lua_getfield(L, colors, i3ext_client_states[i]);
+            if (!lua_isnil(L, -1)) {
+                i3ext_validate_color_list(L, -1, state_path, 5);
+            }
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+
+    snprintf(sub, sizeof(sub), "%s.gradients", path);
+    if (i3ext_get_table(L, idx, "gradients", sub)) {
+        const int gradients = lua_absindex(L, -1);
+        i3ext_check_keys(L, gradients, sub, i3ext_client_states,
+                         I3EXT_ARRAY_LEN(i3ext_client_states));
+        for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_client_states); i++) {
+            char state_path[420];
+            snprintf(state_path, sizeof(state_path), "%s.%s", sub, i3ext_client_states[i]);
+            lua_getfield(L, gradients, i3ext_client_states[i]);
+            if (!lua_isnil(L, -1)) {
+                i3ext_validate_gradient(L, -1, state_path);
+            }
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+}
+
+static void i3ext_validate_themes(lua_State *L, int idx, const char *path) {
+    idx = lua_absindex(L, idx);
+    if (!lua_istable(L, idx)) {
+        luaL_error(L, "%s: expected table", path);
+    }
+    lua_pushnil(L);
+    while (lua_next(L, idx)) {
+        if (lua_type(L, -2) != LUA_TSTRING) {
+            luaL_error(L, "%s: theme names must be strings", path);
+        }
+        const char *name = lua_tostring(L, -2);
+        if (*name == '\0') {
+            luaL_error(L, "%s: theme name must not be empty", path);
+        }
+        if (!lua_istable(L, -1)) {
+            luaL_error(L, "%s.%s: expected table", path, name);
+        }
+        const int theme = lua_absindex(L, -1);
+        char theme_path[384];
+        snprintf(theme_path, sizeof(theme_path), "%s.%s", path, name);
+        i3ext_check_keys(L, theme, theme_path, i3ext_theme_keys,
+                         I3EXT_ARRAY_LEN(i3ext_theme_keys));
+
+        char sub[420];
+        snprintf(sub, sizeof(sub), "%s.client", theme_path);
+        if (i3ext_get_table(L, theme, "client", sub)) {
+            i3ext_validate_client(L, -1, sub);
+            lua_pop(L, 1);
+        }
+        snprintf(sub, sizeof(sub), "%s.bar", theme_path);
+        if (i3ext_get_table(L, theme, "bar", sub)) {
+            i3ext_validate_bar(L, -1, sub);
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+}
+
+static void i3ext_validate_theme_selection(lua_State *L, int table) {
+    table = lua_absindex(L, table);
+
+    lua_getfield(L, table, "theme");
+    if (!lua_isnil(L, -1)) {
+        if (lua_type(L, -1) != LUA_TSTRING || *lua_tostring(L, -1) == '\0') {
+            luaL_error(L, "i3ext.theme: expected non-empty string");
+        }
+    }
+    const char *selected = lua_isnil(L, -1) ? I3EXT_DEFAULT_THEME : lua_tostring(L, -1);
+    const bool has_theme_field = !lua_isnil(L, -1);
+    lua_pop(L, 1);
+
+    lua_getfield(L, table, "themes");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        if (has_theme_field) {
+            luaL_error(L, "i3ext.theme: no themes are defined");
+        }
+        return;
+    }
+    if (!lua_istable(L, -1)) {
+        luaL_error(L, "i3ext.themes: expected table");
+    }
+    const int themes = lua_absindex(L, -1);
+    lua_getfield(L, themes, selected);
+    if (lua_isnil(L, -1)) {
+        luaL_error(L, "i3ext.theme: theme \"%s\" is not defined", selected);
+    }
+    lua_pop(L, 2);
+}
+
 static void i3ext_validate(lua_State *L, int table) {
     table = lua_absindex(L, table);
     if (!lua_istable(L, table)) {
@@ -917,44 +1085,21 @@ static void i3ext_validate(lua_State *L, int table) {
     }
 
     if (i3ext_get_table(L, table, "client", "i3ext.client")) {
-        const int client = lua_absindex(L, -1);
-        i3ext_check_keys(L, client, "i3ext.client",
-                         i3ext_client_keys, I3EXT_ARRAY_LEN(i3ext_client_keys));
-        i3ext_get_hex(L, client, "background", "i3ext.client.background");
-
-        if (i3ext_get_table(L, client, "colors", "i3ext.client.colors")) {
-            const int colors = lua_absindex(L, -1);
-            i3ext_check_keys(L, colors, "i3ext.client.colors",
-                             i3ext_client_states, I3EXT_ARRAY_LEN(i3ext_client_states));
-            for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_client_states); i++) {
-                char path[256];
-                snprintf(path, sizeof(path), "i3ext.client.colors.%s", i3ext_client_states[i]);
-                lua_getfield(L, colors, i3ext_client_states[i]);
-                if (!lua_isnil(L, -1)) {
-                    i3ext_validate_color_list(L, -1, path, 5);
-                }
-                lua_pop(L, 1);
-            }
-            lua_pop(L, 1);
-        }
-
-        if (i3ext_get_table(L, client, "gradients", "i3ext.client.gradients")) {
-            const int gradients = lua_absindex(L, -1);
-            i3ext_check_keys(L, gradients, "i3ext.client.gradients",
-                             i3ext_client_states, I3EXT_ARRAY_LEN(i3ext_client_states));
-            for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_client_states); i++) {
-                char path[256];
-                snprintf(path, sizeof(path), "i3ext.client.gradients.%s", i3ext_client_states[i]);
-                lua_getfield(L, gradients, i3ext_client_states[i]);
-                if (!lua_isnil(L, -1)) {
-                    i3ext_validate_gradient(L, -1, path);
-                }
-                lua_pop(L, 1);
-            }
-            lua_pop(L, 1);
-        }
+        i3ext_validate_client(L, -1, "i3ext.client");
         lua_pop(L, 1);
     }
+
+    if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
+        i3ext_validate_bar(L, -1, "i3ext.bar");
+        lua_pop(L, 1);
+    }
+
+    if (i3ext_get_table(L, table, "themes", "i3ext.themes")) {
+        i3ext_validate_themes(L, -1, "i3ext.themes");
+        lua_pop(L, 1);
+    }
+
+    i3ext_validate_theme_selection(L, table);
 
     if (i3ext_get_table(L, table, "animations", "i3ext.animations")) {
         const int animations = lua_absindex(L, -1);
@@ -1176,6 +1321,173 @@ static void i3ext_apply_animation_type(lua_State *L, int animations, const char 
     cfg_animation(NULL, result, spec);
 }
 
+static void i3ext_apply_client(lua_State *L, int idx, const char *path,
+                               struct ConfigResultIR *result) {
+    idx = lua_absindex(L, idx);
+    char sub[384];
+
+    const char *background;
+    snprintf(sub, sizeof(sub), "%s.background", path);
+    if (i3ext_get_string(L, idx, "background", sub, &background)) {
+        cfg_color_single(NULL, result, "client.background", background);
+    }
+
+    snprintf(sub, sizeof(sub), "%s.colors", path);
+    if (i3ext_get_table(L, idx, "colors", sub)) {
+        const int colors = lua_absindex(L, -1);
+        static const char *const states[] = {
+            "focused", "focused_inactive", "unfocused", "urgent"};
+        for (size_t i = 0; i < I3EXT_ARRAY_LEN(states); i++) {
+            char classname[64];
+            snprintf(classname, sizeof(classname), "client.%s", states[i]);
+            i3ext_apply_color_list(L, colors, states[i], sub, classname, result);
+        }
+        lua_pop(L, 1);
+    }
+
+    snprintf(sub, sizeof(sub), "%s.gradients", path);
+    if (i3ext_get_table(L, idx, "gradients", sub)) {
+        const int gradients = lua_absindex(L, -1);
+        static const char *const states[] = {
+            "focused", "focused_inactive", "unfocused", "urgent"};
+        for (size_t i = 0; i < I3EXT_ARRAY_LEN(states); i++) {
+            char classname[64];
+            snprintf(classname, sizeof(classname), "client.%s", states[i]);
+            i3ext_apply_gradient(L, gradients, states[i], sub, classname, result);
+        }
+        lua_pop(L, 1);
+    }
+}
+
+static void i3ext_bar_set_single(const char *name, const char *value) {
+    Barconfig *barconfig;
+    TAILQ_FOREACH (barconfig, &barconfigs, configs) {
+        char **slot = NULL;
+        if (strcmp(name, "background") == 0) {
+            slot = &barconfig->colors.background;
+        } else if (strcmp(name, "statusline") == 0) {
+            slot = &barconfig->colors.statusline;
+        } else if (strcmp(name, "separator") == 0) {
+            slot = &barconfig->colors.separator;
+        } else if (strcmp(name, "focused_background") == 0) {
+            slot = &barconfig->colors.focused_background;
+        } else if (strcmp(name, "focused_statusline") == 0) {
+            slot = &barconfig->colors.focused_statusline;
+        } else if (strcmp(name, "focused_separator") == 0) {
+            slot = &barconfig->colors.focused_separator;
+        }
+        if (slot == NULL) {
+            continue;
+        }
+        FREE(*slot);
+        *slot = sstrdup(value);
+    }
+}
+
+static void i3ext_bar_set_triple(const char *name, const char *border,
+                                 const char *background, const char *text) {
+    Barconfig *barconfig;
+    TAILQ_FOREACH (barconfig, &barconfigs, configs) {
+        char **border_slot = NULL;
+        char **bg_slot = NULL;
+        char **text_slot = NULL;
+        if (strcmp(name, "focused_workspace") == 0) {
+            border_slot = &barconfig->colors.focused_workspace_border;
+            bg_slot = &barconfig->colors.focused_workspace_bg;
+            text_slot = &barconfig->colors.focused_workspace_text;
+        } else if (strcmp(name, "active_workspace") == 0) {
+            border_slot = &barconfig->colors.active_workspace_border;
+            bg_slot = &barconfig->colors.active_workspace_bg;
+            text_slot = &barconfig->colors.active_workspace_text;
+        } else if (strcmp(name, "inactive_workspace") == 0) {
+            border_slot = &barconfig->colors.inactive_workspace_border;
+            bg_slot = &barconfig->colors.inactive_workspace_bg;
+            text_slot = &barconfig->colors.inactive_workspace_text;
+        } else if (strcmp(name, "urgent_workspace") == 0) {
+            border_slot = &barconfig->colors.urgent_workspace_border;
+            bg_slot = &barconfig->colors.urgent_workspace_bg;
+            text_slot = &barconfig->colors.urgent_workspace_text;
+        } else if (strcmp(name, "binding_mode") == 0) {
+            border_slot = &barconfig->colors.binding_mode_border;
+            bg_slot = &barconfig->colors.binding_mode_bg;
+            text_slot = &barconfig->colors.binding_mode_text;
+        }
+        if (border_slot == NULL) {
+            continue;
+        }
+        FREE(*border_slot);
+        FREE(*bg_slot);
+        FREE(*text_slot);
+        *border_slot = sstrdup(border);
+        *bg_slot = sstrdup(background);
+        *text_slot = sstrdup(text);
+    }
+}
+
+static void i3ext_apply_bar(lua_State *L, int idx, const char *path,
+                            struct ConfigResultIR *result) {
+    idx = lua_absindex(L, idx);
+    (void)result;
+
+    if (TAILQ_EMPTY(&barconfigs)) {
+        luaL_error(L, "%s: no bar configuration found (bar {} must precede i3ext)", path);
+    }
+
+    for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_bar_single_keys); i++) {
+        lua_getfield(L, idx, i3ext_bar_single_keys[i]);
+        if (!lua_isnil(L, -1)) {
+            i3ext_bar_set_single(i3ext_bar_single_keys[i], lua_tostring(L, -1));
+        }
+        lua_pop(L, 1);
+    }
+
+    for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_bar_triple_keys); i++) {
+        lua_getfield(L, idx, i3ext_bar_triple_keys[i]);
+        if (lua_isnil(L, -1)) {
+            lua_pop(L, 1);
+            continue;
+        }
+        const int triple = lua_absindex(L, -1);
+        lua_geti(L, triple, 1);
+        const char *border = lua_tostring(L, -1);
+        lua_geti(L, triple, 2);
+        const char *background = lua_tostring(L, -1);
+        lua_geti(L, triple, 3);
+        const char *text = lua_tostring(L, -1);
+        i3ext_bar_set_triple(i3ext_bar_triple_keys[i], border, background, text);
+        lua_pop(L, 4);
+    }
+}
+
+static bool i3ext_push_selected_theme(lua_State *L, int table) {
+    table = lua_absindex(L, table);
+    lua_getfield(L, table, "themes");
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+    const int themes = lua_absindex(L, -1);
+
+    const char *selected = I3EXT_DEFAULT_THEME;
+    lua_getfield(L, table, "theme");
+    if (!lua_isnil(L, -1)) {
+        selected = lua_tostring(L, -1);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, themes, selected);
+    lua_remove(L, themes);
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+    return true;
+}
+
 static void i3ext_apply(lua_State *L, int table) {
     struct ConfigResultIR result = {0};
     table = lua_absindex(L, table);
@@ -1223,7 +1535,21 @@ static void i3ext_apply(lua_State *L, int table) {
         lua_pop(L, 1);
     }
 
-    /* 1. gaps */
+    /* 0.5 selected theme: client first, then bar. */
+    if (i3ext_push_selected_theme(L, table)) {
+        const int theme = lua_absindex(L, -1);
+        if (i3ext_get_table(L, theme, "client", "i3ext.theme.client")) {
+            i3ext_apply_client(L, -1, "i3ext.theme.client", &result);
+            lua_pop(L, 1);
+        }
+        if (i3ext_get_table(L, theme, "bar", "i3ext.theme.bar")) {
+            i3ext_apply_bar(L, -1, "i3ext.theme.bar", &result);
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+
+
     if (i3ext_get_table(L, table, "gaps", "i3ext.gaps")) {
         const int gaps = lua_absindex(L, -1);
         for (size_t i = 0; i < I3EXT_ARRAY_LEN(i3ext_gap_keys); i++) {
@@ -1313,42 +1639,15 @@ static void i3ext_apply(lua_State *L, int table) {
         lua_pop(L, 1);
     }
 
-    /* 5. client.background */
+    /* 5. top-level client (overrides the theme) */
     if (i3ext_get_table(L, table, "client", "i3ext.client")) {
-        const int client = lua_absindex(L, -1);
-        const char *background;
-        if (i3ext_get_string(L, client, "background",
-                             "i3ext.client.background", &background)) {
-            cfg_color_single(NULL, &result, "client.background", background);
-        }
+        i3ext_apply_client(L, -1, "i3ext.client", &result);
+        lua_pop(L, 1);
+    }
 
-        /* 6. client.colors */
-        if (i3ext_get_table(L, client, "colors", "i3ext.client.colors")) {
-            const int colors = lua_absindex(L, -1);
-            static const char *const states[] = {
-                "focused", "focused_inactive", "unfocused", "urgent"};
-            for (size_t i = 0; i < I3EXT_ARRAY_LEN(states); i++) {
-                char classname[64];
-                snprintf(classname, sizeof(classname), "client.%s", states[i]);
-                i3ext_apply_color_list(L, colors, states[i], "i3ext.client.colors",
-                                       classname, &result);
-            }
-            lua_pop(L, 1);
-        }
-
-        /* 7. client.gradients */
-        if (i3ext_get_table(L, client, "gradients", "i3ext.client.gradients")) {
-            const int gradients = lua_absindex(L, -1);
-            static const char *const states[] = {
-                "focused", "focused_inactive", "unfocused", "urgent"};
-            for (size_t i = 0; i < I3EXT_ARRAY_LEN(states); i++) {
-                char classname[64];
-                snprintf(classname, sizeof(classname), "client.%s", states[i]);
-                i3ext_apply_gradient(L, gradients, states[i], "i3ext.client.gradients",
-                                     classname, &result);
-            }
-            lua_pop(L, 1);
-        }
+    /* 5.5 top-level bar (overrides the theme) */
+    if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
+        i3ext_apply_bar(L, -1, "i3ext.bar", &result);
         lua_pop(L, 1);
     }
 

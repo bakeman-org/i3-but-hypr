@@ -151,9 +151,15 @@ Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scra
   `binds` 在固定顺序中最先应用；与原生 `bindsym` 重复时由
   `check_for_duplicate_bindings()` 检出并使 `i3 -C` 失败。首版不支持
   criteria 前缀和 mode 内键位，这类绑定继续使用原生写法。
+- 新增 `theme` / `themes` / `bar`：palette 定义在 `themes.<name>` 中，
+  同时覆盖窗口 titlebar/border 与 i3bar 颜色；`theme = "..."` 一行切换，
+  省略时默认 `gruber_darker`。所有主题都会完整校验；i3bar 颜色应用到
+  `barconfigs` 中的所有 bar，原生 `bar { ... }` 必须写在 `i3ext` 之前。
+  顶层 `client` / `bar` 仍可作为主题后的覆盖项。用户配置内置
+  `gruber_darker`、`md3`、`onedark`、`dracula`、`catppuccin_mocha`。
 - 两阶段应用：先校验未知字段/类型/范围/枚举/十六进制颜色，再按固定顺序调用
-  既有 `cfg_*` setter：**binds** → gaps → decoration → opacity → titlebar →
-  client.background → client.colors → client.gradients → animations → dropdown
+  既有 `cfg_*` setter：**binds** → 主题 client → 主题 bar → gaps → decoration
+  → opacity → titlebar → 顶层 client → 顶层 bar → animations → dropdown
   → layouts。未知键和类型/范围错误是致命错误，使 `i3 -C` 失败。
 - `animations.<类型>` 的 `duration` 省略时沿用原值（不清零），`enabled = false`
   可关闭单个类型；`open`/`close` 分别映射 `windowsIn`/`windowsOut`，
