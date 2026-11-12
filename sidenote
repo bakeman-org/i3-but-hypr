@@ -1,0 +1,2 @@
+test by `meson test`
+rm debian/ folder, use github release only

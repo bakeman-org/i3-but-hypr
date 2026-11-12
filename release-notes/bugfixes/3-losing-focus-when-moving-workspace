@@ -1,1 +1,0 @@
-fix bug where moving a workspace to another screen would sometimes cause it to lose focus

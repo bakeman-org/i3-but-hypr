@@ -283,13 +283,14 @@ else
 	'man/i3-msg.1',
 	'man/i3-input.1',
 	'man/i3-nagbar.1',
-	'man/i3-config-wizard.1',
-	'man/i3-migrate-config-to-v4.1',
-	'man/i3-sensible-editor.1',
-	'man/i3-sensible-pager.1',
-	'man/i3-sensible-terminal.1',
+        # TODO: this fork is not going to install these files
+        #'man/i3-config-wizard.1',
+	#'man/i3-migrate-config-to-v4.1',
+	#'man/i3-sensible-editor.1',
+	#'man/i3-sensible-pager.1',
+	#'man/i3-sensible-terminal.1',
+        #'man/i3-dmenu-desktop.1',
 	'man/i3-dump-log.1',
-	'man/i3-dmenu-desktop.1',
 	'man/i3-save-tree.1',
       ],
       install_dir: man1,
@@ -539,20 +540,21 @@ executable(
   link_with: libi3,
 )
 
-executable(
-  'i3-config-wizard',
-  [
-    'i3-config-wizard/i3-config-wizard-atoms.xmacro.h',
-    'i3-config-wizard/main.c',
-    'i3-config-wizard/xcb.h',
-    config_parser,
-  ],
-  # TODO: this fork is not going to install this config-wizard, config not really compatible anymore
-  install: false,
-  include_directories: include_directories('include', 'i3-config-wizard'),
-  dependencies: common_deps,
-  link_with: libi3,
-)
+# TODO: this is useless on this fork
+#executable(
+#  'i3-config-wizard',
+#  [
+#    'i3-config-wizard/i3-config-wizard-atoms.xmacro.h',
+#    'i3-config-wizard/main.c',
+#    'i3-config-wizard/xcb.h',
+#    config_parser,
+#  ],
+#  # TODO: this fork is not going to install this config-wizard, config not really compatible anymore
+#  install: false,
+#  include_directories: include_directories('include', 'i3-config-wizard'),
+#  dependencies: common_deps,
+#  link_with: libi3,
+#)
 
 executable(
   'i3-dump-log',
