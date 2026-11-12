@@ -43,7 +43,9 @@ if version_array.length() > 2
 else
   cdata.set('PATCH_VERSION', 0)
 endif
-cdata.set_quoted('I3_VERSION', '@VCS_TAG@')
+#cdata.set_quoted('I3_VERSION', '@VCS_TAG@')
+#TODO: this fork is my own fork, so mark as my fork
+cdata.set_quoted('I3_VERSION', '@VCS_TAG@' + ' with bakeman\'s fork')
 cdata.set_quoted('SYSCONFDIR', join_paths(get_option('prefix'), get_option('sysconfdir')))
 
 if get_option('b_sanitize').split(',').contains('address')
@@ -147,28 +149,29 @@ endif
 
 install_data(
   [
-    'docs/bigpicture.png',
-    'docs/single_terminal.png',
-    'docs/snapping.png',
-    'docs/two_columns.png',
-    'docs/two_terminals.png',
-    'docs/modes.png',
-    'docs/wsbar.png',
-    'docs/keyboard-layer1.png',
-    'docs/keyboard-layer2.png',
-    'docs/i3-sync-working.png',
-    'docs/i3-sync.png',
-    'docs/tree-layout1.png',
-    'docs/tree-layout2.png',
-    'docs/tree-shot1.png',
-    'docs/tree-shot2.png',
-    'docs/tree-shot3.png',
-    'docs/tree-shot4.png',
-    'docs/refcard.html',
-    'docs/refcard_style.css',
-    'docs/logo-30.png',
-    'docs/layout-saving-1.png',
-    'docs/gaps1920.png',
+    # TODO: this fork not going to install data slops
+    #'docs/bigpicture.png',
+    #'docs/single_terminal.png',
+    #'docs/snapping.png',
+    #'docs/two_columns.png',
+    #'docs/two_terminals.png',
+    #'docs/modes.png',
+    #'docs/wsbar.png',
+    #'docs/keyboard-layer1.png',
+    #'docs/keyboard-layer2.png',
+    #'docs/i3-sync-working.png',
+    #'docs/i3-sync.png',
+    #'docs/tree-layout1.png',
+    #'docs/tree-layout2.png',
+    #'docs/tree-shot1.png',
+    #'docs/tree-shot2.png',
+    #'docs/tree-shot3.png',
+    #'docs/tree-shot4.png',
+    #'docs/refcard.html',
+    #'docs/refcard_style.css',
+    #'docs/logo-30.png',
+    #'docs/layout-saving-1.png',
+    #'docs/gaps1920.png',
   ],
   install_dir: docdir,
 )
@@ -595,12 +598,13 @@ executable(
 
 install_data(
   [
-    'i3-dmenu-desktop',
-    'i3-migrate-config-to-v4',
-    'i3-save-tree',
-    'i3-sensible-editor',
-    'i3-sensible-pager',
-    'i3-sensible-terminal',
+    # TODO: this fork is not going to install i3 shell utils
+    #'i3-dmenu-desktop',
+    #'i3-migrate-config-to-v4',
+    #'i3-save-tree',
+    #'i3-sensible-editor',
+    #'i3-sensible-pager',
+    #'i3-sensible-terminal',
   ],
   install_dir: 'bin',
 )
