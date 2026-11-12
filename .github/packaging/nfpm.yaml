@@ -1,0 +1,81 @@
+name: i3-but-hypr
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+release: ${RELEASE}
+section: x11
+priority: optional
+maintainer: bakeman-org <bakeman-org@users.noreply.github.com>
+description: |
+  i3 window manager fork with Hyprland/mangowc-inspired features:
+  Lua-based i3ext configuration, dropdown windows, thumbnail switcher,
+  animations, gaps, rounded corners, gradients and more.
+vendor: bakeman-org
+homepage: https://github.com/bakeman-org/i3-but-hypr
+license: BSD-3-Clause
+provides:
+  - i3
+  - i3-wm
+conflicts:
+  - i3
+  - i3-wm
+replaces:
+  - i3
+  - i3-wm
+contents:
+  - src: pkg/usr
+    dst: /usr
+    type: tree
+  - src: pkg/etc/i3/config
+    dst: /etc/i3/config
+    type: config|noreplace
+  - src: pkg/etc/i3/config.keycodes
+    dst: /etc/i3/config.keycodes
+    type: config|noreplace
+overrides:
+  deb:
+    depends:
+      - libxcb1
+      - libxcb-util1
+      - libxcb-cursor0
+      - libxcb-keysyms1
+      - libxcb-icccm4
+      - libxcb-xinerama0
+      - libxcb-randr0
+      - libxcb-shape0
+      - libxcb-xrm0
+      - libxcb-xkb1
+      - libxcb-render0
+      - libxcb-shm0
+      - libxcb-image0
+      - libxcb-render-util0
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libstartup-notification0
+      - libpango-1.0-0
+      - libcairo2
+      - libyajl2
+      - libev4
+      - liblua5.4-0
+      - libx11-6
+      - libx11-xcb1
+      - libpcre2-8-0
+  rpm:
+    depends:
+      - libxcb
+      - xcb-util
+      - xcb-util-cursor
+      - xcb-util-keysyms
+      - xcb-util-wm
+      - xcb-util-xrm
+      - libxkbcommon
+      - libxkbcommon-x11
+      - startup-notification
+      - pango
+      - cairo
+      - yajl
+      - libev
+      - lua-libs
+      - libX11
+      - libX11-xcb
+      - pcre2
