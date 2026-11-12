@@ -136,13 +136,20 @@ dropdown_position top|bottom   # 从顶部或底部滑入，默认 top
 animation dropdown, <开关>, <时长 ms>, <曲线名>   # 默认 250ms / easeOutQuint
 ```
 
-- 几何使用工作区 `ws->rect`（已包含 outer gaps）。`dropdown_height` / `dropdown_position`
-  给出默认值；单次调用还可以用几何参数覆盖（见下）。
+- 几何使用工作区 `ws->rect`（已包含 outer gaps），并在此基础上再按 `gaps inner`
+  向四边内缩同样的距离（下称 dropdown 间距，取值 0–16px）：单窗口下拉和多窗口
+  band 共用这条外边距，因此都不会贴着屏幕边缘。`dropdown_height` /
+  `dropdown_position` 给出默认值；单次调用还可以用几何参数覆盖（见下）。
+- 单个下拉的宽高按内缩后区域计算；`align left|center|right` 与
+  `position top|bottom` 也都在该区域内定位。
 - 隐藏时先播放滑出动画，动画结束后才移入 `__i3_scratch`；显示时从屏幕外滑到目标位置。
   `animations off` 或时长为 0 时立即显示/隐藏。
 - 多个下拉窗口同时显示时自动平铺，互不遮挡：同一工作区上最多 4 个时横向等分，
   超过 4 个改为两行；它们共享同一条全局 band（高度取 `dropdown_height`，位置取
-  `dropdown_position`）。此时单客户端的 position/height/width/align 覆盖不生效。
+  `dropdown_position`），band 同样位于内缩区域内，槽与槽之间使用相同的 dropdown
+  间距。多窗口时不再对每个 tile 调用 `floating_check_size()`，避免应用 size hint
+  造成宽高不齐，保证每个 tile 都是精确的等宽等高槽位。此时单客户端的
+  position/height/width/align 覆盖不生效。
   显示或隐藏任意一个都会立即重排其余可见下拉；重新排布只发生在显示/隐藏时，
   不会产生每帧开销。
 - 只有一个可见下拉时，继续使用下面列出的每客户端几何覆盖；新显示的下拉从各自
@@ -180,12 +187,19 @@ dropdown recall [<position>,<height>,<width>,<align>]   # 召回最近隐藏的�
   下面的绑定即可覆盖原来 quake-term 的两条规则：
 
 ```text
-# 当前焦点窗口：不是下拉则转换并显示，是下拉则收起
-bindsym $mod+backslash dropdown toggle
+# 当前焦点窗口：普通窗口直接转换并显示；收起下拉前用 dmenu 确认
+bindsym $mod+backslash exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle
 
 # 召回最近隐藏的下拉窗口（可连续用于多个应用）
 bindsym $mod+Shift+backslash dropdown recall
 ```
+
+- `~/.config/i3/bin/i3-dropdown-toggle` 是 `$mod+\` 使用的确认助手（Python 3 标准库）：
+  焦点窗口是可见下拉时，用 dmenu 询问 `Hide dropdown?`（Yes/No），只有选择 Yes
+  才隐藏；普通窗口则直接执行 `dropdown toggle` 完成转换并显示，不弹确认。
+  隐藏时按原窗口 id（criteria）下发命令，因此 dmenu 改变焦点也不会收错窗口。
+  命令本身 `dropdown hide` 以及不带 criteria 的 `dropdown toggle` 仍然是非交互的，
+  脚本只是键位层面的包装。
 
 - 需要按应用固定几何时，仍可用 criteria：
   `[instance="quake-alacritty"] dropdown toggle "bottom,0.25,0.4,right"`。

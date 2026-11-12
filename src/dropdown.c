@@ -170,8 +170,50 @@ static int dropdown_client_position(Con *client) {
 }
 
 /*
+ * Returns the margin used around the dropdown area and between tiled
+ * dropdowns. It reuses the workspace inner gap so that dropdowns line up with
+ * the tiled windows, capped at 16 pixels.
+ *
+ */
+static int dropdown_gap(Con *ws) {
+    int gap = calculate_effective_gaps(ws).inner;
+    if (gap < 0) {
+        return 0;
+    }
+    if (gap > 16) {
+        return 16;
+    }
+    return gap;
+}
+
+/*
+ * Returns the workspace rect inset by dropdown_gap(ws) on all four sides. The
+ * single-dropdown geometry and the shared multi-dropdown band both use this
+ * area, so they always keep the same outer margin.
+ *
+ */
+static Rect dropdown_area(Con *ws) {
+    const int margin = dropdown_gap(ws);
+    Rect area = {
+        .x = ws->rect.x + margin,
+        .y = ws->rect.y + margin,
+        .width = (int)ws->rect.width - 2 * margin,
+        .height = (int)ws->rect.height - 2 * margin,
+    };
+    if (area.width < 1) {
+        area.width = 1;
+    }
+    if (area.height < 1) {
+        area.height = 1;
+    }
+    return area;
+}
+
+/*
  * Computes the target geometry of a dropdown window on the given workspace.
- * The workspace rect already has the outer gaps applied.
+ * The workspace rect already has the outer gaps applied; the dropdown is
+ * additionally inset by dropdown_gap(ws) so that it does not touch the screen
+ * edge.
  *
  */
 static Rect dropdown_geometry(Con *client, Con *ws) {
@@ -186,39 +228,40 @@ static Rect dropdown_geometry(Con *client, Con *ws) {
         align = client->dropdown_align;
     }
 
-    uint32_t width = (uint32_t)((double)ws->rect.width * width_ratio);
-    uint32_t height = (uint32_t)((double)ws->rect.height * height_ratio);
+    const Rect area = dropdown_area(ws);
+    uint32_t width = (uint32_t)((double)area.width * width_ratio);
+    uint32_t height = (uint32_t)((double)area.height * height_ratio);
     if (width < 1) {
         width = 1;
     }
-    if (width > ws->rect.width) {
-        width = ws->rect.width;
+    if (width > area.width) {
+        width = area.width;
     }
     if (height < 1) {
         height = 1;
     }
-    if (height > ws->rect.height) {
-        height = ws->rect.height;
+    if (height > area.height) {
+        height = area.height;
     }
 
-    Rect rect = ws->rect;
+    Rect rect = area;
     switch (align) {
         case DROPDOWN_ALIGN_LEFT:
-            rect.x = ws->rect.x;
+            rect.x = area.x;
             break;
         case DROPDOWN_ALIGN_RIGHT:
-            rect.x = ws->rect.x + ws->rect.width - width;
+            rect.x = area.x + area.width - width;
             break;
         case DROPDOWN_ALIGN_CENTER:
         default:
-            rect.x = ws->rect.x + (ws->rect.width - width) / 2;
+            rect.x = area.x + (area.width - width) / 2;
             break;
     }
 
     if (position == DROPDOWN_POSITION_BOTTOM) {
-        rect.y = ws->rect.y + ws->rect.height - height;
+        rect.y = area.y + area.height - height;
     } else {
-        rect.y = ws->rect.y;
+        rect.y = area.y;
     }
 
     rect.width = width;
@@ -281,26 +324,28 @@ static int dropdown_collect_visible(Con *ws, Con *exclude, Con **clients, int ma
 }
 
 /*
- * The band shared by all dropdowns on a workspace. Its height is derived from
- * the global dropdown_height and its vertical position from the global
+ * The band shared by all dropdowns on a workspace. It is inset by
+ * dropdown_gap(ws) like the single-dropdown geometry, its height is derived
+ * from the global dropdown_height and its vertical position from the global
  * dropdown_position: per-client overrides do not make sense for a shared band.
  *
  */
 static Rect dropdown_band(Con *ws) {
-    uint32_t height = (uint32_t)((double)ws->rect.height * config.dropdown_height);
+    const Rect area = dropdown_area(ws);
+    uint32_t height = (uint32_t)((double)area.height * config.dropdown_height);
     if (height < 1) {
         height = 1;
     }
-    if (height > ws->rect.height) {
-        height = ws->rect.height;
+    if (height > area.height) {
+        height = area.height;
     }
 
-    Rect band = ws->rect;
+    Rect band = area;
     band.height = height;
     if (config.dropdown_position == DROPDOWN_POSITION_BOTTOM) {
-        band.y = ws->rect.y + ws->rect.height - height;
+        band.y = area.y + area.height - height;
     } else {
-        band.y = ws->rect.y;
+        band.y = area.y;
     }
     return band;
 }
@@ -355,12 +400,7 @@ static void dropdown_layout_visible(Con *ws, Con *newly_shown, bool newly_shown_
 
     const bool multiple = (count > 1);
     Rect band = dropdown_band(ws);
-    int gap = calculate_effective_gaps(ws).inner;
-    if (gap < 0) {
-        gap = 0;
-    } else if (gap > 16) {
-        gap = 16;
-    }
+    const int gap = dropdown_gap(ws);
     const int band_position = config.dropdown_position == DROPDOWN_POSITION_BOTTOM
                                   ? DROPDOWN_POSITION_BOTTOM
                                   : DROPDOWN_POSITION_TOP;
@@ -384,7 +424,11 @@ static void dropdown_layout_visible(Con *ws, Con *newly_shown, bool newly_shown_
         }
 
         floating->rect = target;
-        floating_check_size(floating, false);
+        /* With several dropdowns every tile must get the exact slot size;
+         * honoring size hints here would make the tiles uneven. */
+        if (!multiple) {
+            floating_check_size(floating, false);
+        }
         render_con(floating);
 
         const Rect new_client_rect = client->rect;

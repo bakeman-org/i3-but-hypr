@@ -105,6 +105,14 @@ Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scra
   `$mod+Shift+\` 绑定。
 - 几何：默认顶部/底部、工作区全宽、高度为 `ws->rect`（含 outer gaps）的
   `dropdown_height` 比例，位置由 `dropdown_position top|bottom` 控制。
+  在此基础上再按 `gaps inner`（上限 16px）四边内缩：单个下拉与多窗口 band 共用
+  同一条外边距；多窗口槽位也按该内缩区域等分，槽间距相同。
+- 多窗口平铺时跳过 `floating_check_size()`，避免应用 size hint 导致 tile 宽高不齐，
+  每个槽位都使用精确的等宽等高矩形。
+- 新增 `~/.config/i3/bin/i3-dropdown-toggle`（Python 3 标准库）：焦点窗口是可见
+  下拉时先用 dmenu 询问 `Hide dropdown?`（Yes/No），确认后按原窗口 id 的 criteria
+  隐藏；普通窗口直接执行 `dropdown toggle` 转换并显示，不弹确认。用户的
+  `$mod+\` 已改为 `exec` 该脚本；`dropdown hide` 命令本身仍是非交互的。
 - 隐藏时先按 `animation dropdown` 的时长/曲线滑出屏幕，动画结束回调
   （`animation.c` 的 `dropdown_hide_pending`）才移入 `__i3_scratch`，进程保持存活；
   显示时从屏幕外滑回目标矩形。`animations off` 或时长为 0 时立即生效。
