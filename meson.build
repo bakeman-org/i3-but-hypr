@@ -206,12 +206,13 @@ if get_option('mans')
     'man/i3-msg.man',
     'man/i3-input.man',
     'man/i3-nagbar.man',
-    'man/i3-config-wizard.man',
-    'man/i3-migrate-config-to-v4.man',
-    'man/i3-sensible-editor.man',
-    'man/i3-sensible-pager.man',
-    'man/i3-sensible-terminal.man',
     'man/i3-dump-log.man',
+    # TODO: this fork is not going to install the rest thing
+    #'man/i3-config-wizard.man',
+    #'man/i3-migrate-config-to-v4.man',
+    #'man/i3-sensible-editor.man',
+    #'man/i3-sensible-pager.man',
+    #'man/i3-sensible-terminal.man',
   ]
 
   foreach m : man_inputs
@@ -546,7 +547,8 @@ executable(
     'i3-config-wizard/xcb.h',
     config_parser,
   ],
-  install: true,
+  # TODO: this fork is not going to install this config-wizard, config not really compatible anymore
+  install: false,
   include_directories: include_directories('include', 'i3-config-wizard'),
   dependencies: common_deps,
   link_with: libi3,

@@ -51,3 +51,4 @@ LAST_VERSION
 # e.g. by listing your directory in .git/info/exclude.
 /build
 core.*
+*.deb

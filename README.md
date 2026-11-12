@@ -1,6 +1,12 @@
 # NOTICE
 - LLM driven code, if you do mind llm, please don't use or it will break your system and family.
 
+
+# get from github release by eget(a go program TODO a link)
+```bash
+eget --pre-release https://github.com/bakeman-org/i3-but-hypr
+```
+
 ![Logo](docs/logo-30.png) i3: A tiling window manager
 =====================================================
 
