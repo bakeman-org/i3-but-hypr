@@ -34,6 +34,7 @@ state INITIAL:
   'shmlog' -> SHMLOG
   'debuglog' -> DEBUGLOG
   'border' -> BORDER
+  'titlebar' -> TITLEBAR
   'layout' -> LAYOUT
   'append_layout' -> APPEND_LAYOUT
   'workspace' -> WORKSPACE
@@ -131,6 +132,11 @@ state BORDER_WIDTH:
     -> call cmd_border($border_style, -1)
   border_width = number
     -> call cmd_border($border_style, &border_width)
+
+# titlebar normal|none|toggle
+state TITLEBAR:
+  titlebar_style = 'normal', 'none', 'toggle'
+    -> call cmd_titlebar($titlebar_style)
 
 # gaps inner|outer|horizontal|vertical|top|right|bottom|left [current] [set|plus|minus|toggle] <px>
 state GAPS:

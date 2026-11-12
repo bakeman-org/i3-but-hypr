@@ -547,7 +547,11 @@ void manage_window(xcb_window_t window, xcb_get_window_attributes_cookie_t cooki
 
     if (has_mwm_hints) {
         DLOG("MOTIF_WM_HINTS specifies decorations (border_style = %d)\n", motif_border_style);
-        if (want_floating) {
+        if (want_floating && motif_border_style == BS_NONE) {
+            /* Floating windows keep their title bar (see floating_enable());
+             * the user can hide it with `titlebar none|toggle`. */
+            DLOG("Ignoring _MOTIF_WM_HINTS decorations=0 for floating window\n");
+        } else if (want_floating) {
             con_set_border_style(nc, motif_border_style, config.default_floating_border_width);
         } else {
             con_set_border_style(nc, motif_border_style, config.default_border_width);

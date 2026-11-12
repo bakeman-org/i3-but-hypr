@@ -81,6 +81,13 @@ void cmd_resize(I3_CMD, const char *way, const char *direction, long resize_px, 
 void cmd_border(I3_CMD, const char *border_style_str, long border_width);
 
 /**
+ * Implementation of 'titlebar normal|none|toggle': shows or hides the title bar
+ * of the matched windows at runtime.
+ *
+ */
+void cmd_titlebar(I3_CMD, const char *titlebar_style);
+
+/**
  * Implementation of 'nop <comment>'.
  *
  */

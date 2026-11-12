@@ -360,6 +360,16 @@ bool floating_enable(Con *con, bool automatic) {
         con->border_style = con->max_user_border_style = config.default_floating_border;
     }
 
+    /* Client-side decorated applications (Chromium/Electron/GTK) ask for no
+     * decorations via _MOTIF_WM_HINTS, which leaves them without a title bar
+     * when they are floating: the title is gone and the window can only be
+     * moved by dragging its content. Give floating windows their title bar
+     * back unless the user explicitly wants a borderless window (that is,
+     * unless their preference, max_user_border_style, is BS_NONE as well). */
+    if (con->border_style == BS_NONE && con->max_user_border_style >= BS_NORMAL) {
+        con->border_style = BS_NORMAL;
+    }
+
     /* Add pixels for the decoration. */
     Rect bsr = con_border_style_rect(con);
 

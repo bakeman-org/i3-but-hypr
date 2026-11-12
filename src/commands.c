@@ -727,6 +727,66 @@ void cmd_border(I3_CMD, const char *border_style_str, const long border_width) {
 }
 
 /*
+ * Implementation of 'titlebar normal|none|toggle'.
+ *
+ * This is the runtime counterpart of the global `titlebar` configuration
+ * directive: it only affects the matched windows. The choice is stored in
+ * max_user_border_style, so it survives toggling floating/tiling and is not
+ * overridden by _MOTIF_WM_HINTS (used by client-side decorated applications to
+ * ask for no decorations at all).
+ *
+ */
+void cmd_titlebar(I3_CMD, const char *titlebar_style) {
+    DLOG("titlebar style should be changed to %s\n", titlebar_style);
+    owindow *current;
+
+    HANDLE_EMPTY_MATCH;
+
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        Con *con = current->con;
+
+        border_style_t target;
+        if (strcmp(titlebar_style, "toggle") == 0) {
+            target = (con->border_style == BS_NORMAL) ? BS_NONE : BS_NORMAL;
+        } else if (strcmp(titlebar_style, "none") == 0) {
+            target = BS_NONE;
+        } else if (strcmp(titlebar_style, "normal") == 0) {
+            target = BS_NORMAL;
+        } else {
+            yerror("BUG: called with titlebar_style=%s", titlebar_style);
+            return;
+        }
+
+        const int border_width = con_inside_floating(con) != NULL
+                                     ? config.default_floating_border_width
+                                     : config.default_border_width;
+
+        /* Remember the user's choice first: con_set_border_style() clamps the
+         * requested style to max_user_border_style. */
+        con->max_user_border_style = target;
+
+        Con *floating = con_inside_floating(con);
+        if (floating == NULL) {
+            con_set_border_style(con, target, border_width);
+            continue;
+        }
+
+        /* Floating windows: con_set_border_style() keeps the *client* size and
+         * therefore grows/shrinks the frame, which makes a snapped window
+         * overflow its zone when the title bar is toggled. Keep the frame
+         * geometry (and thus the snapped zone) instead and only adjust the
+         * client area inside of it. */
+        const Rect frame = floating->rect;
+        con_set_border_style(con, target, border_width);
+        floating->rect = frame;
+        con->rect = rect_add(frame, con_border_style_rect(con));
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
  * Implementation of 'nop <comment>'.
  *
  */

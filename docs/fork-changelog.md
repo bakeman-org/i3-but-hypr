@@ -44,6 +44,9 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
   `bindsym $mod+Left focus left`。
 - `switcher next|prev|commit|close`：niri/mangowc 风格 Alt+Tab 缩略图切换器
   （Composite 抓图预览 + MRU 顺序 + 松开修饰键确认），见 `src/switcher.c`。
+- `titlebar normal|none|toggle`：运行时显示/隐藏匹配窗口的标题栏（可按窗口绑定按键）。
+  浮动窗口默认保留标题栏：应用的 `_MOTIF_WM_HINTS`（Chromium/Electron/GTK 等 CSD 客户端
+  会用它请求“无边框”）在浮动状态下被忽略，见 `src/floating.c`、`src/handlers.c`。
 - `cyclenext` / `cycleprev`：循环聚焦。
 - `zoom`、`swapdir`：主区交换/方向交换。
 - `layoutmsg <msg>`：`togglesplit`、`proportion ±delta`、`setproportion <x>`
