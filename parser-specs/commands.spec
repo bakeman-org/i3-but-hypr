@@ -19,8 +19,10 @@ state INITIAL:
   'togglesplit' -> call cmd_toggle_split()
   'pseudo' -> call cmd_pseudo()
   'centerwindow' -> call cmd_center_window()
+  'snap' -> SNAP
   'cyclenext' -> call cmd_cycle_next()
   'cycleprev' -> call cmd_cycle_prev()
+  'switcher' -> SWITCHER
   'layoutmsg' -> LAYOUTMSG
   'zoom' -> call cmd_zoom()
   'swapdir' -> SWAPDIR
@@ -567,6 +569,16 @@ state BAR_MODE_ID:
 state LAYOUTMSG:
   message = string
       -> call cmd_layoutmsg($message)
+
+# switcher <action>
+state SWITCHER:
+  action = 'next', 'prev', 'commit', 'close'
+      -> call cmd_switcher($action)
+
+# snap <zone>
+state SNAP:
+  zone = 'left', 'right', 'up', 'down', 'top-left', 'top-right', 'bottom-left', 'bottom-right'
+      -> call cmd_snap($zone)
 
 # swapdir left|right|up|down
 state SWAPDIR:

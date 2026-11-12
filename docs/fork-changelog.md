@@ -38,6 +38,12 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 ### 3. 新命令（`src/commands.c`、`parser-specs/commands.spec`）
 
 - `centerwindow`：把当前**浮动**窗口在工作区内居中（对平铺窗口报错，见 userguide）。
+- `snap left|right|up|down|top-left|top-right|bottom-left|bottom-right`：KDE 式快速贴边。
+  浮动窗口按方向贴半屏/四分屏；同一方向连按会从“四分 → 半屏 → 整个工作区”逐级放大。
+  平铺窗口下 `left/right/up/down` 自动退化为 `focus` 移动，因此可以直接替换配置里的
+  `bindsym $mod+Left focus left`。
+- `switcher next|prev|commit|close`：niri/mangowc 风格 Alt+Tab 缩略图切换器
+  （Composite 抓图预览 + MRU 顺序 + 松开修饰键确认），见 `src/switcher.c`。
 - `cyclenext` / `cycleprev`：循环聚焦。
 - `zoom`、`swapdir`：主区交换/方向交换。
 - `layoutmsg <msg>`：`togglesplit`、`proportion ±delta`、`setproportion <x>`

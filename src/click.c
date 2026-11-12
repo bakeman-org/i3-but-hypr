@@ -378,6 +378,11 @@ void handle_button_press(xcb_button_press_event_t *event) {
 
     last_timestamp = event->time;
 
+    /* Clicks on the switcher panel select the tile that was clicked on. */
+    if (switcher_handle_button(event)) {
+        return;
+    }
+
     if ((con = con_by_window_id(event->event))) {
         route_click(con, event, CLICK_INSIDE);
         return;

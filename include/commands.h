@@ -349,9 +349,11 @@ void cmd_swap_with_master(I3_CMD);
 void cmd_toggle_split(I3_CMD);
 void cmd_pseudo(I3_CMD);
 void cmd_center_window(I3_CMD);
+void cmd_snap(I3_CMD, const char *zone);
 void cmd_layoutmsg(I3_CMD, const char *message);
 void cmd_cycle_next(I3_CMD);
 void cmd_cycle_prev(I3_CMD);
+void cmd_switcher(I3_CMD, const char *action);
 
 /**
  * Implementation of 'zoom'

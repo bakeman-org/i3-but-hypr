@@ -168,7 +168,20 @@ pseudo            # dwindle 伪平铺切换
 centerwindow      # 将当前窗口居中
 cyclenext         # 循环聚焦下一个窗口
 cycleprev         # 循环聚焦上一个窗口
+snap left|right|up|down                            # 浮动窗口贴边；平铺时等价 focus
+snap top-left|top-right|bottom-left|bottom-right   # 直接贴到四分屏
+switcher next|prev                                 # Alt+Tab 缩略图切换器（打开/循环）
+switcher commit|close                              # 确认 / 取消
 ```
+
+`snap` 的行为（KDE Quick Tile 风格）：
+
+| 当前状态 | 按 `snap left` | 再按 `snap up` | 再按 `snap up` |
+| --- | --- | --- | --- |
+| 居中浮动窗口 | 左半屏 | 左上四分屏 | 上半屏（全宽） |
+
+焦点在平铺窗口时，`snap left|right|up|down` 等同于 `focus left|right|up|down`，
+所以可以把方向键直接换成 `snap`，浮动/平铺两种状态都顺手。
 
 ### layoutmsg 消息（Hyprland 风格）
 
@@ -195,6 +208,20 @@ bindsym $mod+y layoutmsg togglesplit
 bindsym $mod+equal layoutmsg proportion +0.05
 bindsym $mod+minus layoutmsg proportion -0.05
 bindsym $mod+c centerwindow
+
+# 浮动窗口贴边（平铺时自动退化为 focus 移动）
+bindsym $mod+Left snap left
+bindsym $mod+Right snap right
+bindsym $mod+Up snap up
+bindsym $mod+Down snap down
+
+# 可选：直接贴四角
+bindsym $mod+ctrl+Left snap top-left
+bindsym $mod+ctrl+Right snap bottom-right
+
+# Alt+Tab 缩略图切换器
+bindsym Mod1+Tab switcher next
+bindsym Mod1+Shift+Tab switcher prev
 ```
 
 ## 五、默认值与热重载

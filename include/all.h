@@ -50,6 +50,7 @@
 #include "gaps.h"
 #include "drag.h"
 #include "animation.h"
+#include "switcher.h"
 #include "configuration.h"
 #include "handlers.h"
 #include "randr.h"

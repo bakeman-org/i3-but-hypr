@@ -1515,6 +1515,7 @@ void handle_event(int type, xcb_generic_event_t *event) {
 
         case XCB_EXPOSE:
             if (((xcb_expose_event_t *)event)->count == 0) {
+                switcher_handle_expose(((xcb_expose_event_t *)event)->window);
                 handle_expose_event((xcb_expose_event_t *)event);
             }
 

@@ -1,3 +1,6 @@
+# NOTICE
+- LLM driven code, if you do mind llm, please don't use or it will break your system and family.
+
 ![Logo](docs/logo-30.png) i3: A tiling window manager
 =====================================================
 
@@ -13,3 +16,10 @@ i3 is a tiling window manager for X11.
 For more information about i3, please see [the project's website](https://i3wm.org/) and [online documentation](https://i3wm.org/docs/).
 
 For information about contributing to i3, please see [CONTRIBUTING.md](.github/CONTRIBUTING.md).
+
+# ref links
+- hyprland
+- mangowc
+- niri
+- kde
+- codebuddy

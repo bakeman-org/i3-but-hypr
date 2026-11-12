@@ -2886,6 +2886,159 @@ void cmd_center_window(I3_CMD) {
 }
 
 /*
+ * Moves the given snap axis one step: if it already points at the requested
+ * zone, the *other* axis is reset first (e.g. top-left -> top half) and only
+ * then the window is restored to the full workspace. This is the cycling
+ * behaviour of KDE's quick tiling.
+ *
+ */
+static void snap_step(int *axis, int target, int *other) {
+    if (*axis == target) {
+        if (*other != 0) {
+            *other = 0;
+        } else {
+            *axis = 0;
+        }
+    } else {
+        *axis = target;
+    }
+}
+
+/*
+ * Implementation of 'snap <zone>': KDE-style quick tiling of floating
+ * windows. The zone is derived from the request plus the current position of
+ * the window inside its workspace, so that pressing left and then up results
+ * in the top-left quarter:
+ *
+ *  - `snap left|right|up|down` halves the window along the given axis and
+ *    keeps the other axis, pressing the same direction again widens the
+ *    window (quarter -> half -> full workspace),
+ *  - `snap top-left|top-right|bottom-left|bottom-right` jumps directly to the
+ *    given quarter.
+ *
+ * For tiled windows the direction keys keep their usual meaning (they move
+ * the focus), so `snap left` can be used as a drop-in replacement for
+ * `focus left` in the configuration.
+ *
+ */
+void cmd_snap(I3_CMD, const char *zone) {
+    assert(zone != NULL); /* Compiler complains */
+
+    HANDLE_EMPTY_MATCH;
+
+    owindow *current;
+    TAILQ_FOREACH (current, &OWINDOWS, owindows) {
+        Con *con = current->con;
+        Con *ws = con_get_workspace(con);
+        if (ws == NULL || con_is_internal(ws)) {
+            continue;
+        }
+
+        if (!con_is_floating(con)) {
+            /* Tiled windows: behave like `focus left|right|up|down`. Corner
+             * zones have no focus equivalent and are ignored. */
+            if (strcmp(zone, "left") == 0) {
+                tree_next(con, D_LEFT);
+            } else if (strcmp(zone, "right") == 0) {
+                tree_next(con, D_RIGHT);
+            } else if (strcmp(zone, "up") == 0) {
+                tree_next(con, D_UP);
+            } else if (strcmp(zone, "down") == 0) {
+                tree_next(con, D_DOWN);
+            }
+            continue;
+        }
+
+        /* Floating windows are wrapped in a CT_FLOATING_CON which holds the
+         * geometry that is actually rendered. */
+        Con *floating = con;
+        if (floating->parent != NULL && floating->parent->type == CT_FLOATING_CON) {
+            floating = floating->parent;
+        }
+
+        const Rect area = ws->rect;
+        if (area.width == 0 || area.height == 0) {
+            continue;
+        }
+
+        /* Which third of the workspace does the window currently occupy?
+         * -1 = left/top, 0 = full size, 1 = right/bottom. */
+        const double cx = ((double)floating->rect.x + floating->rect.width / 2.0 - area.x) / area.width;
+        const double cy = ((double)floating->rect.y + floating->rect.height / 2.0 - area.y) / area.height;
+        int hz = (cx < 0.45) ? -1 : (cx > 0.55 ? 1 : 0);
+        int vt = (cy < 0.45) ? -1 : (cy > 0.55 ? 1 : 0);
+
+        if (strcmp(zone, "left") == 0) {
+            snap_step(&hz, -1, &vt);
+        } else if (strcmp(zone, "right") == 0) {
+            snap_step(&hz, 1, &vt);
+        } else if (strcmp(zone, "up") == 0) {
+            snap_step(&vt, -1, &hz);
+        } else if (strcmp(zone, "down") == 0) {
+            snap_step(&vt, 1, &hz);
+        } else if (strcmp(zone, "top-left") == 0) {
+            hz = -1;
+            vt = -1;
+        } else if (strcmp(zone, "top-right") == 0) {
+            hz = 1;
+            vt = -1;
+        } else if (strcmp(zone, "bottom-left") == 0) {
+            hz = -1;
+            vt = 1;
+        } else if (strcmp(zone, "bottom-right") == 0) {
+            hz = 1;
+            vt = 1;
+        } else {
+            yerror("Unknown snap zone \"%s\".", zone);
+            return;
+        }
+
+        /* Keep half a gap between the two halves so that snapped windows look
+         * like tiled ones. The workspace rect already has the outer gaps
+         * applied by the renderer. */
+        int inner = calculate_effective_gaps(ws).inner;
+        if (inner < 0) {
+            inner = 0;
+        }
+        if (inner > (int)area.width / 4) {
+            inner = (int)area.width / 4;
+        }
+        if (inner > (int)area.height / 4) {
+            inner = (int)area.height / 4;
+        }
+
+        const int half_w = MAX(1, ((int)area.width - inner) / 2);
+        const int half_h = MAX(1, ((int)area.height - inner) / 2);
+
+        Rect rect = area;
+        if (hz < 0) {
+            rect.width = half_w;
+        } else if (hz > 0) {
+            rect.width = half_w;
+            rect.x = area.x + area.width - half_w;
+        }
+        if (vt < 0) {
+            rect.height = half_h;
+        } else if (vt > 0) {
+            rect.height = half_h;
+            rect.y = area.y + area.height - half_h;
+        }
+
+        if (rect.x == floating->rect.x && rect.y == floating->rect.y &&
+            rect.width == floating->rect.width && rect.height == floating->rect.height) {
+            continue;
+        }
+
+        /* x_push_node() animates the transition automatically (see the
+         * geometry animation start in x.c). */
+        floating->rect = rect;
+    }
+
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
  * Implementation of 'layoutmsg <message>': Hyprland-style layout messages for
  * the dwindle and master layouts.
  *
@@ -3076,6 +3229,38 @@ void cmd_cycle_prev(I3_CMD) {
         return;
     }
     cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
+ * Implementation of 'switcher <action>': niri-style alt-tab window switcher
+ * with thumbnail previews (ported from mangowc). `next`/`prev` open the
+ * switcher or cycle the selection while it is open, `commit` focuses the
+ * highlighted window and `close` cancels. While the switcher is open it grabs
+ * the keyboard itself, so this command is normally only ever called by the
+ * initial binding; see src/switcher.c for the rest of the interaction.
+ *
+ */
+void cmd_switcher(I3_CMD, const char *action) {
+    if (action == NULL) {
+        yerror("switcher requires an argument (next, prev, commit or close).");
+        return;
+    }
+
+    if (strcasecmp(action, "next") == 0) {
+        switcher_next(1);
+    } else if (strcasecmp(action, "prev") == 0) {
+        switcher_next(-1);
+    } else if (strcasecmp(action, "commit") == 0) {
+        switcher_commit();
+    } else if (strcasecmp(action, "close") == 0) {
+        switcher_close();
+    } else {
+        yerror("Unknown switcher action \"%s\".", action);
+        return;
+    }
+
+    /* switcher_commit() renders the tree itself. */
     ysuccess(true);
 }
 

@@ -22,6 +22,13 @@ void handle_key_press(xcb_key_press_event_t *event) {
 
     DLOG("%s %d, state raw = 0x%x\n", (key_release ? "KeyRelease" : "KeyPress"), event->detail, event->state);
 
+    /* While the switcher is open it owns the keyboard: it consumes presses
+     * (Tab to cycle, Enter to confirm, Escape to cancel) and modifier
+     * releases (which confirm the selection, like mangowc's switcher). */
+    if (switcher_handle_key(event)) {
+        return;
+    }
+
     Binding *bind = get_binding_from_xcb_event((xcb_generic_event_t *)event);
 
     /* if we couldn't find a binding, we are done */
