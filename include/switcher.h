@@ -27,10 +27,13 @@
 
 /*
  * Opens the switcher (or, if it is already open, cycles the selection) in the
- * given direction. This is the `switcher next|prev` command.
+ * given direction. This is the `switcher next|prev` command. In sticky mode
+ * the switcher stays open when the modifier key is released (useful for
+ * taking screenshots of the panel); it is then closed or committed only
+ * explicitly with Escape/Enter or `switcher commit|close`.
  *
  */
-void switcher_next(int direction);
+void switcher_next(int direction, bool sticky);
 
 /*
  * Focuses the currently highlighted window and closes the switcher.

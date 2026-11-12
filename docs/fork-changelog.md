@@ -44,6 +44,10 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
   `bindsym $mod+Left focus left`。
 - `switcher next|prev|commit|close`：niri/mangowc 风格 Alt+Tab 缩略图切换器
   （Composite 抓图预览 + MRU 顺序 + 松开修饰键确认），见 `src/switcher.c`。
+  每个 tile 只画预览，选中项用当前主题的边框渐变高亮；窗口标题统一显示在
+  面板底部的共享标题栏里（对应 mangowc 的 `title_message_bar`）。
+  `switcher next|prev sticky` 为冻结模式：松开修饰键不会确认，面板保持显示，
+  便于截图/排查，需用 Esc、Enter 或 `switcher commit|close` 结束。
 - `titlebar normal|none|toggle`：运行时显示/隐藏匹配窗口的标题栏（可按窗口绑定按键）。
   浮动窗口默认保留标题栏：应用的 `_MOTIF_WM_HINTS`（Chromium/Electron/GTK 等 CSD 客户端
   会用它请求“无边框”）在浮动状态下被忽略，见 `src/floating.c`、`src/handlers.c`。

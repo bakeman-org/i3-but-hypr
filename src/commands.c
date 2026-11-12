@@ -3301,16 +3301,18 @@ void cmd_cycle_prev(I3_CMD) {
  * initial binding; see src/switcher.c for the rest of the interaction.
  *
  */
-void cmd_switcher(I3_CMD, const char *action) {
+void cmd_switcher(I3_CMD, const char *action, const char *sticky_arg) {
     if (action == NULL) {
         yerror("switcher requires an argument (next, prev, commit or close).");
         return;
     }
 
+    const bool sticky = (sticky_arg != NULL);
+
     if (strcasecmp(action, "next") == 0) {
-        switcher_next(1);
+        switcher_next(1, sticky);
     } else if (strcasecmp(action, "prev") == 0) {
-        switcher_next(-1);
+        switcher_next(-1, sticky);
     } else if (strcasecmp(action, "commit") == 0) {
         switcher_commit();
     } else if (strcasecmp(action, "close") == 0) {

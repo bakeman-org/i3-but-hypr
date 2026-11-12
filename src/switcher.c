@@ -39,6 +39,9 @@ struct switcher_geometry {
 
 static struct {
     bool active;
+    /* Sticky mode: modifier releases do not confirm the selection, so the
+     * panel can be examined (and screenshotted) at leisure. */
+    bool sticky;
     int index;
     int count;
     struct switcher_candidate candidates[SW_MAX_CANDIDATES];
@@ -133,6 +136,18 @@ static cairo_surface_t *capture_preview(Con *con) {
     return image;
 }
 
+/*
+ * Title of a candidate window. Con containers for X windows keep the name in
+ * con->window->name (con->name is NULL for them).
+ *
+ */
+static const char *candidate_title(struct switcher_candidate *c) {
+    if (c->con->window != NULL && c->con->window->name != NULL) {
+        return i3string_as_utf8(c->con->window->name);
+    }
+    return c->con->name != NULL ? c->con->name : "";
+}
+
 /******************************************************************************
  * Geometry & drawing
  ******************************************************************************/
@@ -156,17 +171,23 @@ static void compute_geometry(void) {
         g->tile_w = MAX(max_w, logical_px(120));
     }
 
-    g->title_h = font_h + SW_TITLE_GAP;
+    /* One shared title bar below the tiles shows the title of the currently
+     * selected window (mangowc's title_message_bar). */
+    g->title_h = font_h + 2 * SW_TITLE_GAP;
 
     const int max_panel_w = (int)(out_rect->width * 0.8);
     g->per_row = (max_panel_w + SW_GAP) / (g->tile_w + SW_GAP);
     if (g->per_row < 1) {
         g->per_row = 1;
     }
+    /* Do not reserve columns for tiles that do not exist. */
+    if (g->per_row > sw.count) {
+        g->per_row = sw.count;
+    }
     const int rows = (sw.count + g->per_row - 1) / g->per_row;
 
     g->panel_w = g->per_row * g->tile_w + (g->per_row - 1) * SW_GAP + 2 * SW_PAD;
-    g->panel_h = rows * (g->tile_h + g->title_h) + (rows - 1) * SW_GAP + 2 * SW_PAD;
+    g->panel_h = rows * g->tile_h + (rows - 1) * SW_GAP + 2 * SW_PAD + SW_TITLE_GAP + g->title_h;
 
     g->panel_x = out_rect->x + ((int)out_rect->width - g->panel_w) / 2;
     g->panel_y = out_rect->y + ((int)out_rect->height - g->panel_h) / 2;
@@ -196,7 +217,7 @@ static void draw_preview(struct switcher_candidate *c, int x, int y, int w, int 
         cairo_paint(cr);
     } else {
         /* Fallback: a large, dimmed window title inside the tile. */
-        i3String *title = i3string_from_utf8(c->con->name ? c->con->name : "");
+        i3String *title = i3string_from_utf8(candidate_title(c));
         draw_util_text(title, surface, config.client.unfocused.text,
                        config.client.unfocused.background,
                        x + logical_px(8), y + h / 2 - config.font.height / 2, w - logical_px(16));
@@ -206,31 +227,44 @@ static void draw_preview(struct switcher_candidate *c, int x, int y, int w, int 
     cairo_restore(cr);
 }
 
+/*
+ * Draws the frame (SW_PAD wide border ring) around a tile, mirroring mangowc:
+ * the selected tile uses the focused colors, the others the unfocused ones.
+ * Gradient borders are honored so that the switcher matches the window
+ * borders of the running config.
+ *
+ */
+static void draw_tile_frame(bool selected, int x, int y, int w, int h) {
+    surface_t *surface = &(sw.panel_surface);
+    const struct Colortriple *colors = selected ? &(config.client.focused)
+                                                : &(config.client.unfocused);
+    const struct gradient_spec *gradient = selected ? &(config.client_gradients.focused)
+                                                    : &(config.client_gradients.unfocused);
+
+    if (gradient->enabled) {
+        draw_util_gradient_rounded_rectangle(surface, gradient->start, gradient->end,
+                                             gradient->angle, x, y, w, h, 0);
+    } else {
+        draw_util_rectangle(surface, colors->border, x, y, w, h);
+    }
+}
+
 static void draw_tile(int i) {
     struct switcher_geometry *g = &(sw.geo);
-    surface_t *surface = &(sw.panel_surface);
-    cairo_t *cr = surface->cr;
+    cairo_t *cr = sw.panel_surface.cr;
 
     const int row = i / g->per_row;
     const int col = i % g->per_row;
     const int x = SW_PAD + col * (g->tile_w + SW_GAP);
-    const int y = SW_PAD + row * (g->tile_h + g->title_h + SW_GAP);
+    const int y = SW_PAD + row * (g->tile_h + SW_GAP);
 
     cairo_save(cr);
 
-    /* Border frame: highlighted for the selected tile. */
-    const struct Colortriple *colors = (i == sw.index) ? &(config.client.focused)
-                                                       : &(config.client.unfocused);
-    draw_util_rectangle(surface, colors->border, x, y, g->tile_w, g->tile_h + g->title_h);
+    draw_tile_frame(i == sw.index, x, y, g->tile_w, g->tile_h);
 
-    draw_preview(&(sw.candidates[i]), x + 1, y + 1, g->tile_w - 2, g->tile_h - 2);
-
-    /* Title below the preview. */
-    struct switcher_candidate *c = &(sw.candidates[i]);
-    i3String *title = i3string_from_utf8(c->con->name ? c->con->name : "");
-    draw_util_text(title, surface, colors->text, config.client.focused.background,
-                   x, y + g->tile_h + (g->title_h - config.font.height) / 2, g->tile_w);
-    i3string_free(title);
+    /* The preview sits inside the frame, like the client area of a window. */
+    draw_preview(&(sw.candidates[i]), x + SW_PAD, y + SW_PAD,
+                 g->tile_w - 2 * SW_PAD, g->tile_h - 2 * SW_PAD);
 
     cairo_restore(cr);
 }
@@ -242,11 +276,28 @@ static void draw_panel(void) {
 
     surface_t *surface = &(sw.panel_surface);
 
-    draw_util_rectangle(surface, config.client.focused.background, 0, 0, sw.geo.panel_w, sw.geo.panel_h);
+    draw_util_rectangle(surface, config.client.background, 0, 0, sw.geo.panel_w, sw.geo.panel_h);
 
     for (int i = 0; i < sw.count; i++) {
         draw_tile(i);
     }
+
+    /* Shared title bar below the tiles: shows the title of the currently
+     * selected window (mangowc's title_message_bar). */
+    struct switcher_candidate *sel = &(sw.candidates[sw.index]);
+    const struct Colortriple *colors = &(config.client.focused);
+    const int bar_y = sw.geo.panel_h - sw.geo.title_h;
+    draw_util_rectangle(surface, colors->border, 0, bar_y, sw.geo.panel_w, sw.geo.title_h);
+    i3String *sel_title = i3string_from_utf8(candidate_title(sel));
+    const int text_w = predict_text_width(sel_title);
+    int text_x = (sw.geo.panel_w - text_w) / 2;
+    if (text_x < logical_px(8)) {
+        text_x = logical_px(8);
+    }
+    draw_util_text(sel_title, surface, colors->text, colors->border,
+                   text_x, bar_y + (sw.geo.title_h - config.font.height) / 2,
+                   sw.geo.panel_w - text_x - logical_px(8));
+    i3string_free(sel_title);
 
     /* The panel is an override-redirect window, so i3 does not manage its
      * stacking: the frames of the managed windows would cover it. Raise it
@@ -278,8 +329,9 @@ static void free_candidates(void) {
     sw.count = 0;
 }
 
-static void open_panel(int direction) {
+static void open_panel(int direction, bool sticky) {
     memset(&sw, 0, sizeof(sw));
+    sw.sticky = sticky;
 
     Con *workspace = con_get_workspace(focused);
     if (workspace == NULL) {
@@ -384,9 +436,9 @@ void switcher_commit(void) {
  * Public API
  ******************************************************************************/
 
-void switcher_next(int direction) {
+void switcher_next(int direction, bool sticky) {
     if (!sw.active) {
-        open_panel(direction);
+        open_panel(direction, sticky);
         return;
     }
 
@@ -434,9 +486,12 @@ bool switcher_handle_key(xcb_key_press_event_t *event) {
     const xkb_keysym_t sym = xcb_key_symbols_get_keysym(keysyms, event->detail, 0);
 
     if (release) {
-        /* mangowc semantics: releasing any modifier confirms the selection. */
+        /* mangowc semantics: releasing any modifier confirms the selection.
+         * In sticky mode releases are ignored so that the panel stays open. */
         if (is_modifier_keysym(sym)) {
-            switcher_commit();
+            if (!sw.sticky) {
+                switcher_commit();
+            }
             return true;
         }
         /* Releases of regular keys are only auto-repeat artifacts. */
@@ -445,7 +500,7 @@ bool switcher_handle_key(xcb_key_press_event_t *event) {
 
     if (is_cycle_keysym(sym)) {
         const int direction = (event->state & XCB_MOD_MASK_SHIFT) ? -1 : 1;
-        switcher_next(direction);
+        switcher_next(direction, sw.sticky);
         return true;
     }
 
@@ -459,8 +514,11 @@ bool switcher_handle_key(xcb_key_press_event_t *event) {
         return true;
     }
 
-    /* Any other key cancels the switcher and is swallowed. */
-    switcher_close();
+    /* Any other key cancels the switcher and is swallowed. In sticky mode it
+     * is swallowed without closing so that stray keys do not end the probe. */
+    if (!sw.sticky) {
+        switcher_close();
+    }
     return true;
 }
 
@@ -477,7 +535,7 @@ bool switcher_handle_button(xcb_button_press_event_t *event) {
     const int x = event->event_x - g->panel_x;
     const int y = event->event_y - g->panel_y;
 
-    const int tile_total_h = g->tile_h + g->title_h;
+    const int tile_total_h = g->tile_h;
     const int col = (x - SW_PAD + SW_GAP) / (g->tile_w + SW_GAP);
     const int row = (y - SW_PAD + SW_GAP) / (tile_total_h + SW_GAP);
     if (col < 0 || col >= g->per_row) {

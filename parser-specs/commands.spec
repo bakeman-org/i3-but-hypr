@@ -576,10 +576,14 @@ state LAYOUTMSG:
   message = string
       -> call cmd_layoutmsg($message)
 
-# switcher <action>
+# switcher <action> [sticky]
 state SWITCHER:
   action = 'next', 'prev', 'commit', 'close'
-      -> call cmd_switcher($action)
+      ->
+  sticky = 'sticky'
+      ->
+  end
+      -> call cmd_switcher($action, $sticky)
 
 # snap <zone>
 state SNAP:

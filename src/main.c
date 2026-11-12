@@ -360,7 +360,9 @@ static void nest_run(void) {
         err(EXIT_FAILURE, "fork");
     }
     if (xephyr_pid == 0) {
-        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br", "-fullscreen",
+        /* Windowed instead of fullscreen: otherwise it is hard to tell the
+         * nested instance apart from the real session. */
+        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br",
                "-screen", "1280x800", (char *)NULL);
         _exit(127);
     }
