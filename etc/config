@@ -63,12 +63,8 @@ bindsym --release $mod+d exec --no-startup-id dmenu_run
 # $mod+x：自定义 dmenu 启动脚本
 bindsym $mod+x exec --no-startup-id /home/etcix/.config/i3/bin/local_dmenu_run
 
-# $mod+Tab / Shift+Tab：使用 i3-alt-tab 切换窗口（类似 Alt+Tab）
-bindsym $mod+Tab exec /home/etcix/go/bin/i3-alt-tab -m cycle -d next -s current
-bindsym $mod+Shift+Tab exec /home/etcix/go/bin/i3-alt-tab -m cycle -d prev -s current
-
-# Alt+Tab：缩略图窗口切换器（switcher，niri/mangowc 风格）
-# 键位已迁移到下方 i3ext.binds（switcher next/prev）
+# 窗口切换器统一使用 Alt+Tab 的缩略图 switcher（键位见 i3ext.binds），
+# 不再同时保留 $mod+Tab 的 i3-alt-tab，避免两套实现功能重叠。
 
 # $mod+Shift+q：杀死当前窗口（dmenu 确认）
 # bindsym $mod+Shift+q kill
@@ -91,21 +87,22 @@ bindsym $mod+k focus right
 #bindsym $mod+Shift+k move down
 #bindsym $mod+Shift+l move up
 #bindsym $mod+Shift+semicolon move right
-# 使用方向键移动窗口
-bindsym $mod+Shift+Left move left 30px
-bindsym $mod+Shift+Down move down 30px
-bindsym $mod+Shift+Up move up 30px
-bindsym $mod+Shift+Right move right 30px
+# 使用方向键移动窗口（上游默认语义：把容器移到相邻位置）
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+# 浮动窗口的微调用鼠标：按住 $mod 拖动窗口（floating_modifier）
 
 # ---------- 布局与全屏 ----------
-# 水平分割
-#bindsym $mod+h split h
-# 垂直分割
-#bindsym $mod+v split v
+# 水平分割（上游默认键位）
+bindsym $mod+h split h
+# 垂直分割（上游默认键位）
+bindsym $mod+v split v
 # 切换全屏
 bindsym $mod+f fullscreen toggle
-# 堆叠布局
-#bindsym $mod+s layout stacking
+# 堆叠布局（上游默认键位；fork 的 scroller 改到 $mod+Shift+s）
+bindsym $mod+s layout stacking
 # 标签页布局
 bindsym $mod+w layout tabbed
 # 切换平铺/拆分布局
@@ -398,8 +395,8 @@ i3ext {
         --{ key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
         { key = "Mod4+backslash", command = "dropdown toggle" },
         { key = "Mod4+Shift+backslash", command = "dropdown recall" },
-        -- 标题栏切换
-        { key = "Mod4+Shift+t", command = "titlebar toggle" },
+        -- 边框/标题栏切换统一走 $mod+u（原生 border toggle，见文件末尾；
+        -- 它已经包含浮动窗口的几何保护，因此不再单独绑定 titlebar toggle）
         -- 浮动窗口居中
         { key = "Mod4+c", command = "centerwindow" },
         -- 浮动窗口四分屏
@@ -417,10 +414,10 @@ i3ext {
         { key = "Mod4+Mod1+Down", command = "snap down" },
         { key = "Mod4+Mod1+Up", command = "snap up" },
         { key = "Mod4+Mod1+Right", command = "snap right" },
-        -- 布局扩展
+        -- 布局扩展（上游 s=stacking、w=tabbed、e=toggle split 保持不变）
         { key = "Mod4+m", command = "layout master" },
         { key = "Mod4+t", command = "layout dwindle" },
-        { key = "Mod4+s", command = "layout scroller" },
+        { key = "Mod4+Shift+s", command = "layout scroller" },
         { key = "Mod4+equal", command = "layoutmsg proportion +0.05" },
         { key = "Mod4+minus", command = "layoutmsg proportion -0.05" },
         -- 缩略图窗口切换器（niri/mangowc 风格）
@@ -489,7 +486,10 @@ i3ext {
 }
 
 # ---------- 上游命令键位（保留在原生配置） ----------
-# $mod+u：切换当前窗口边框（无边框 ↔ 有边框）
+# $mod+u：切换当前窗口边框（normal → pixel → none 循环）
+# 原 $mod+Shift+t 的 titlebar toggle 已合并到这里；浮动窗口下会保持 frame
+# 几何，贴边窗口不会因为切换标题栏而溢出。需要单独隐藏标题栏时可用
+# i3-msg 'titlebar toggle'。
 bindsym $mod+u border toggle
-# 其余 fork 扩展键位（titlebar、dropdown、layout、snap、switcher 等）
+# 其余 fork 扩展键位（dropdown、layout、snap、switcher 等）
 # 已迁移到上方 i3ext.binds；tabbed / toggle split / resize 等上游键位留在前面。

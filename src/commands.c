@@ -723,7 +723,21 @@ void cmd_border(I3_CMD, const char *border_style_str, const long border_width) {
         /* User changed the border */
         current->con->max_user_border_style = border_style;
         const int con_border_width = border_width_from_style(border_style, border_width, current->con);
+
+        /* Floating windows: con_set_border_style() keeps the *client* size and
+         * therefore grows/shrinks the frame, which makes a snapped window
+         * overflow its zone when the border/title bar is toggled. Keep the
+         * frame geometry and only adjust the client area inside of it. */
+        Con *floating = con_inside_floating(current->con);
+        if (floating == NULL) {
+            con_set_border_style(current->con, border_style, con_border_width);
+            continue;
+        }
+
+        const Rect frame = floating->rect;
         con_set_border_style(current->con, border_style, con_border_width);
+        floating->rect = frame;
+        current->con->rect = rect_add(frame, con_border_style_rect(current->con));
     }
 
     cmd_output->needs_tree_render = true;

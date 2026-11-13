@@ -586,7 +586,8 @@ i3ext {
     binds = {
         { key = "Mod4+m", command = "layout master" },
         { key = "Mod4+t", command = "layout dwindle" },
-        { key = "Mod4+s", command = "layout scroller" },
+        -- 上游 Mod4+s 保持为 stacking，scroller 用 Shift 区分
+        { key = "Mod4+Shift+s", command = "layout scroller" },
         { key = "Mod4+g", command = "layoutmsg swapwithmaster" },
         { key = "Mod4+o", command = "layoutmsg focusmaster" },
         { key = "Mod4+y", command = "layoutmsg togglesplit" },
@@ -603,9 +604,12 @@ i3ext {
         { key = "Mod4+Mod1+Right", command = "snap right" },
         { key = "Mod4+Mod1+Up", command = "snap up" },
         { key = "Mod4+Mod1+Down", command = "snap down" },
-        -- 可选：直接贴四角
-        { key = "Mod4+Ctrl+Left", command = "snap top-left" },
-        { key = "Mod4+Ctrl+Right", command = "snap bottom-right" },
+        -- 浮动窗口微调用鼠标拖动（floating_modifier $mod）
+        -- 直接贴四角（数字键，避免与方向键语义混淆）
+        { key = "Mod4+Ctrl+1", command = "snap top-left" },
+        { key = "Mod4+Ctrl+2", command = "snap top-right" },
+        { key = "Mod4+Ctrl+3", command = "snap bottom-left" },
+        { key = "Mod4+Ctrl+4", command = "snap bottom-right" },
         -- Alt+Tab 缩略图切换器
         { key = "Mod1+Tab", command = "switcher next" },
         { key = "Mod1+Shift+Tab", command = "switcher prev" },
