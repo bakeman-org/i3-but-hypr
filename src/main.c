@@ -455,12 +455,119 @@ static void nest_isolate_session(void) {
     LOG("nest mode: private session bus on %s\n", nest_buspath);
 }
 
+/* Returns true if the given window is the Xephyr instance spawned by --nest.
+ * Xephyr is started with -name i3-nest-<display>, which ends up in WM_CLASS. */
+static bool nest_is_xephyr_window(xcb_connection_t *host, xcb_window_t win, const char *name) {
+    xcb_get_property_reply_t *reply = xcb_get_property_reply(
+        host, xcb_get_property(host, 0, win, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, 64), NULL);
+    if (reply == NULL) {
+        return false;
+    }
+    bool match = false;
+    const int len = xcb_get_property_value_length(reply);
+    if (len > 0) {
+        const char *value = xcb_get_property_value(reply);
+        match = memmem(value, (size_t)len, name, strlen(name)) != NULL;
+    }
+    free(reply);
+    return match;
+}
+
+/* Looks for the Xephyr window on the host display. The host window manager
+ * may have reparented it into a frame, so the children of the root window are
+ * searched as well. */
+static xcb_window_t nest_find_xephyr_window(xcb_connection_t *host, xcb_window_t root, const char *name) {
+    xcb_window_t found = XCB_NONE;
+    xcb_query_tree_reply_t *tree = xcb_query_tree_reply(host, xcb_query_tree(host, root), NULL);
+    if (tree == NULL) {
+        return XCB_NONE;
+    }
+    const int count = xcb_query_tree_children_length(tree);
+    xcb_window_t *children = xcb_query_tree_children(tree);
+    for (int i = 0; i < count && found == XCB_NONE; i++) {
+        if (nest_is_xephyr_window(host, children[i], name)) {
+            found = children[i];
+            break;
+        }
+        xcb_query_tree_reply_t *sub = xcb_query_tree_reply(host, xcb_query_tree(host, children[i]), NULL);
+        if (sub == NULL) {
+            continue;
+        }
+        const int subcount = xcb_query_tree_children_length(sub);
+        xcb_window_t *subchildren = xcb_query_tree_children(sub);
+        for (int j = 0; j < subcount; j++) {
+            if (nest_is_xephyr_window(host, subchildren[j], name)) {
+                found = subchildren[j];
+                break;
+            }
+        }
+        free(sub);
+    }
+    free(tree);
+    return found;
+}
+
+/* Give the focus to the Xephyr window (and move the pointer inside it) once it
+ * has been mapped. Xephyr grabs the keyboard while its window is focused, so
+ * this makes the nested session isolated from the host's keybindings as soon
+ * as it starts, without requiring the user to click into the window first.
+ * Best effort only: a Wayland host compositor may ignore the focus request. */
+static void nest_focus_xephyr(const char *name) {
+    int screen = 0;
+    xcb_connection_t *host = xcb_connect(NULL, &screen);
+    if (xcb_connection_has_error(host)) {
+        xcb_disconnect(host);
+        return;
+    }
+
+    xcb_screen_iterator_t it = xcb_setup_roots_iterator(xcb_get_setup(host));
+    for (int i = 0; i < screen && it.rem > 0; i++) {
+        xcb_screen_next(&it);
+    }
+    if (it.rem == 0) {
+        xcb_disconnect(host);
+        return;
+    }
+    const xcb_window_t root = it.data->root;
+
+    xcb_window_t win = XCB_NONE;
+    for (int attempt = 0; attempt < 60 && win == XCB_NONE; attempt++) {
+        win = nest_find_xephyr_window(host, root, name);
+        if (win == XCB_NONE) {
+            usleep(100000);
+        }
+    }
+
+    if (win != XCB_NONE) {
+        xcb_set_input_focus(host, XCB_INPUT_FOCUS_PARENT, win, XCB_CURRENT_TIME);
+
+        xcb_translate_coordinates_reply_t *translated = xcb_translate_coordinates_reply(
+            host, xcb_translate_coordinates(host, win, root, 0, 0), NULL);
+        xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(
+            host, xcb_get_geometry(host, win), NULL);
+        if (translated != NULL && geometry != NULL) {
+            xcb_warp_pointer(host, XCB_NONE, root, 0, 0, 0, 0,
+                             translated->dst_x + geometry->width / 2,
+                             translated->dst_y + geometry->height / 2);
+        }
+        free(translated);
+        free(geometry);
+        xcb_flush(host);
+        LOG("nest mode: focused the Xephyr window 0x%08x\n", win);
+    }
+
+    /* Give the requests a moment to reach the host before it starts waiting. */
+    usleep(100000);
+    xcb_disconnect(host);
+}
+
 /* Spawn Xephyr, re-run ourselves on the nested display and wait for it.
  * In the child process, returns so that normal startup continues; the
  * parent process never returns. */
 static void nest_run(void) {
     char sockfile[64];
     char disparg[16];
+    char nest_name[32];
 
     if (!nest_display_explicit) {
         nest_display = nest_find_free_display();
@@ -468,6 +575,9 @@ static void nest_run(void) {
 
     snprintf(sockfile, sizeof(sockfile), "/tmp/.X11-unix/X%d", nest_display);
     snprintf(disparg, sizeof(disparg), ":%d", nest_display);
+    /* Unique per display so that several nested sessions can run at the same
+     * time without nest_focus_xephyr() picking the wrong window. */
+    snprintf(nest_name, sizeof(nest_name), "i3-nest-%d", nest_display);
 
     if (nest_display_in_use(nest_display)) {
         errx(EXIT_FAILURE, "nest mode: display :%d is already in use (pass --nest=N to choose another display)",
@@ -484,19 +594,6 @@ static void nest_run(void) {
     if (i3_pid == 0) {
         /* child: run i3 on the nested display. Xephyr is started by the
          * parent in parallel; wait for it to accept connections. */
-        /* Detect the host session type before hiding the Wayland socket. On a
-         * Wayland host the compositor handles Super bindings before XWayland,
-         * so Xephyr's XGrabKeyboard cannot bypass them: the nested instance
-         * keeps the Mod1 alias bindings. On an X11 host the Ctrl+Shift grab
-         * really hands the keyboard over to Xephyr, so the real $mod works and
-         * the Alt aliases are unnecessary (and would only invent conflicts). */
-        const char *wayland_display = getenv("WAYLAND_DISPLAY");
-        const char *wayland_socket = getenv("WAYLAND_SOCKET");
-        const char *session_type = getenv("XDG_SESSION_TYPE");
-        const bool host_wayland =
-            (wayland_display != NULL && *wayland_display != '\0') ||
-            (wayland_socket != NULL && *wayland_socket != '\0') ||
-            (session_type != NULL && strcasecmp(session_type, "wayland") == 0);
         setenv("DISPLAY", disparg, 1);
         /* Programs started from the nested instance must not talk to the host
          * session: when WAYLAND_DISPLAY is set (the usual case when i3 runs
@@ -521,20 +618,11 @@ static void nest_run(void) {
         if (access(sockfile, F_OK) != 0) {
             errx(EXIT_FAILURE, "nest mode: Xephyr did not start on :%d", nest_display);
         }
-        /* Only Wayland hosts need the Mod4 -> Mod1 alias, see above. */
-        if (host_wayland) {
-            setenv("I3_NEST", "1", 1);
-        } else {
-            unsetenv("I3_NEST");
-        }
-        LOG("nest mode: running on :%d (host session: %s, Alt alias %s)\n",
-            nest_display, host_wayland ? "Wayland" : "X11",
-            host_wayland ? "enabled" : "disabled");
+        LOG("nest mode: running on :%d\n", nest_display);
         fprintf(stderr,
-                "nest mode: press Ctrl+Shift inside the Xephyr window to grab/release the keyboard.%s\n",
-                host_wayland
-                    ? " The host compositor may still consume its own Super bindings."
-                    : " $mod bindings work while the keyboard is grabbed.");
+                "nest mode: the keyboard is captured by Xephyr while its window has the focus.\n"
+                "nest mode: press Ctrl+Shift to release it to the host, press again to re-grab.\n"
+                "nest mode: a Wayland host compositor may still consume its own global shortcuts.\n");
         return;
     }
 
@@ -544,14 +632,20 @@ static void nest_run(void) {
     }
     if (xephyr_pid == 0) {
         /* Windowed instead of fullscreen: otherwise it is hard to tell the
-         * nested instance apart from the real session. */
+         * nested instance apart from the real session. -name identifies the
+         * window for nest_focus_xephyr(). */
         execlp("Xephyr", "Xephyr", disparg, "-ac", "-br",
+               "-name", nest_name, "-title", nest_name,
                "-screen", "1280x800", (char *)NULL);
         _exit(127);
     }
 
     LOG("nest mode: Xephyr on :%d (pid %d), nested i3 (pid %d)\n",
         nest_display, xephyr_pid, i3_pid);
+
+    /* Hand the keyboard to Xephyr so that $mod bindings and Alt+Tab are handled
+     * by the nested instance only, not by the host as well. */
+    nest_focus_xephyr(nest_name);
 
     int status;
     waitpid(i3_pid, &status, 0);
@@ -1241,9 +1335,6 @@ int main(int argc, char *argv[]) {
         die("Could not load keymap\n");
     }
 
-    if (nest_mode) {
-        duplicate_bindings_for_nest_mode();
-    }
     translate_keysyms();
     grab_all_keys(conn);
 

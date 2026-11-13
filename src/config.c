@@ -353,9 +353,6 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     }
 
     if (load_type == C_RELOAD) {
-        if (getenv("I3_NEST") != NULL) {
-            duplicate_bindings_for_nest_mode();
-        }
         translate_keysyms();
         grab_all_keys(conn);
         regrab_all_buttons(conn);

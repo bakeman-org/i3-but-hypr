@@ -1,145 +1,136 @@
-# i3 config file (v4)
-#
-# Please see https://i3wm.org/docs/userguide.html for a complete reference!
-#
-# This config file uses keycodes (bindsym) and was written for the QWERTY
-# layout.
-#
-# To get a config file with the same key positions, but for your current
-# layout, use the i3-config-wizard
-#
+# TODO: This is unfinished sample config, copy this file to ~/.config/i3/config
+# ============================================================
+# i3 配置文件（带中文注释）
+# 文件路径：~/.config/i3/config
+# 保存后自动热重载；也可按 $mod+Shift+r 手动 reload
+# ============================================================
 
-set $mod Mod1
+# ---------- 基本设置 ----------
+# 定义快捷键前缀为 Super 键（Windows 键）
+set $mod Mod4
 
-# Font for window titles. Will also be used by the bar unless a different font
-# is used in the bar {} block below.
-font pango:monospace 8
+# 窗口标题栏字体（等宽，18号）
+font pango:monospace 18
 
-# This font is widely installed, provides lots of unicode glyphs, right-to-left
-# text rendering and scalability on retina/hidpi displays (thanks to pango).
-#font pango:DejaVu Sans Mono 8
-
-# Start XDG autostart .desktop files using dex. See also
-# https://wiki.archlinux.org/index.php/XDG_Autostart
+# ---------- 开机自启动 ----------
+# 启动 XDG 自动启动的桌面应用
 exec --no-startup-id dex --autostart --environment i3
+# 加载 X 资源文件（如终端配色）
+exec --no-startup-id xrdb -merge ~/.Xresources
+# 设置鼠标光标为默认左箭头
+exec --no-startup-id xsetroot -cursor_name left_ptr
+exec --no-startup-id fcitx5 -d
 
-# The combination of xss-lock, nm-applet and pactl is a popular choice, so
-# they are included here as an example. Modify as you see fit.
+# battery warnning
+exec --no-startup-id dunst
+#exec --no-startup-id /home/etcix/.config/i3/bin/i3-low-battery-notifier
 
-# xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
-# screen before suspend. Use loginctl lock-session to lock your screen.
+# 锁屏与休眠：系统休眠时自动调用 i3lock 锁定
 exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
-
-# NetworkManager is the most popular way to manage wireless networks on Linux,
-# and nm-applet is a desktop environment-independent system tray GUI for it.
+# 网络管理托盘图标
 exec --no-startup-id nm-applet
 
-# Use pactl to adjust volume in PulseAudio.
+# ---------- 音量快捷键 ----------
+# 刷新 i3status 状态栏的宏
 set $refresh_i3status killall -SIGUSR1 i3status
+# 音量增加 10%
 bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status
+# 音量减少 10%
 bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -10% && $refresh_i3status
+# 静音切换
 bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
+# 麦克风静音切换
 bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
 
-# use these keys for focus, movement, and resize directions when reaching for
-# the arrows is not convenient
-set $up l
-set $down k
-set $left j
-set $right semicolon
-
-# Use Mouse+$mod to drag floating windows to their wanted position
+# ---------- 鼠标与窗口交互 ----------
+# 按住 $mod 键可用鼠标拖动浮动窗口
 floating_modifier $mod
-
-# move tiling windows via drag & drop by left-clicking into the title bar,
-# or left-clicking anywhere into the window while holding the floating modifier.
+# 平铺窗口可通过标题栏拖拽移动（或按住 $mod 拖任意位置）
 tiling_drag modifier titlebar
 
-# start a terminal
-bindsym $mod+Return exec i3-sensible-terminal
+# ---------- 应用启动与切换 ----------
+# $mod+Enter：启动普通终端 st
+bindsym $mod+Return exec st
+# $mod+Shift+p：截图
+bindsym $mod+Shift+p exec ~/.config/i3/bin/screenshot
 
-# kill focused window
-bindsym $mod+Shift+q kill
+# $mod+d：系统 dmenu_run
+bindsym --release $mod+d exec --no-startup-id dmenu_run
+# $mod+x：自定义 dmenu 启动脚本
+bindsym $mod+x exec --no-startup-id /home/etcix/.config/i3/bin/local_dmenu_run
 
-# start dmenu (a program launcher)
-bindsym $mod+d exec --no-startup-id dmenu_run
-# A more modern dmenu replacement is rofi:
-# bindsym $mod+d exec "rofi -modi drun,run -show drun"
-# There also is i3-dmenu-desktop which only displays applications shipping a
-# .desktop file. It is a wrapper around dmenu, so you need that installed.
-# bindsym $mod+d exec --no-startup-id i3-dmenu-desktop
+# $mod+Tab / Shift+Tab：使用 i3-alt-tab 切换窗口（类似 Alt+Tab）
+bindsym $mod+Tab exec /home/etcix/go/bin/i3-alt-tab -m cycle -d next -s current
+bindsym $mod+Shift+Tab exec /home/etcix/go/bin/i3-alt-tab -m cycle -d prev -s current
 
-# change focus
-bindsym $mod+$left focus left
-bindsym $mod+$down focus down
-bindsym $mod+$up focus up
-bindsym $mod+$right focus right
+# Alt+Tab：缩略图窗口切换器（switcher，niri/mangowc 风格）
+# 键位已迁移到下方 i3ext.binds（switcher next/prev）
 
-# alternatively, you can use the cursor keys:
-bindsym $mod+Left focus left
-bindsym $mod+Down focus down
-bindsym $mod+Up focus up
-bindsym $mod+Right focus right
+# $mod+Shift+q：杀死当前窗口（dmenu 确认）
+# bindsym $mod+Shift+q kill
+bindsym $mod+Shift+q exec "echo 'Yes\nNo' | dmenu -c -p 'Kill window?' | grep -i yes && i3-msg kill"
 
-# move focused window
-bindsym $mod+Shift+$left move left
-bindsym $mod+Shift+$down move down
-bindsym $mod+Shift+$up move up
-bindsym $mod+Shift+$right move right
+# $mod+Shift+b：运行 boomer-c（自定义脚本）
+bindsym $mod+Shift+b exec boomer-c
 
-# alternatively, you can use the cursor keys:
-bindsym $mod+Shift+Left move left
-bindsym $mod+Shift+Down move down
-bindsym $mod+Shift+Up move up
-bindsym $mod+Shift+Right move right
+# ---------- 窗口焦点与移动 ----------
+# 使用 hjkl 移动焦点
+bindsym $mod+j focus left
+#bindsym $mod+k focus down
+bindsym $mod+k focus right
+#bindsym $mod+l focus up
+#bindsym $mod+semicolon focus right
+# 使用方向键移动焦点（snap 是 fork 命令，平铺窗口下退化为 focus）
+# 键位已迁移到 i3ext.binds
 
-# split in horizontal orientation
-bindsym $mod+h split h
+# 使用 hjkl 移动窗口
+#bindsym $mod+Shift+j move left
+#bindsym $mod+Shift+k move down
+#bindsym $mod+Shift+l move up
+#bindsym $mod+Shift+semicolon move right
+# 使用方向键移动窗口
+bindsym $mod+Shift+Left move left 30px
+bindsym $mod+Shift+Down move down 30px
+bindsym $mod+Shift+Up move up 30px
+bindsym $mod+Shift+Right move right 30px
 
-# split in vertical orientation
-bindsym $mod+v split v
-
-# enter fullscreen mode for the focused container
+# ---------- 布局与全屏 ----------
+# 水平分割
+#bindsym $mod+h split h
+# 垂直分割
+#bindsym $mod+v split v
+# 切换全屏
 bindsym $mod+f fullscreen toggle
-
-# change container layout (stacked, tabbed, toggle split)
-bindsym $mod+s layout stacking
+# 堆叠布局
+#bindsym $mod+s layout stacking
+# 标签页布局
 bindsym $mod+w layout tabbed
+# 切换平铺/拆分布局
 bindsym $mod+e layout toggle split
 
-# toggle tiling / floating
+# ---------- 浮动窗口控制 ----------
+# $mod+Shift+Space：当前窗口切换平铺/浮动
 bindsym $mod+Shift+space floating toggle
-
-# change focus between tiling / floating windows
+# $mod+Space：在平铺窗口和浮动窗口间切换焦点
 bindsym $mod+space focus mode_toggle
-
-# focus the parent container
+# $mod+a：聚焦父容器
 bindsym $mod+a focus parent
+# $mod+c（centerwindow）与 $mod+Ctrl+1..4（snap 四分屏）已迁移到 i3ext.binds
 
-# focus the child container
-#bindsym $mod+d focus child
-
-# move the currently focused window to the scratchpad
-bindsym $mod+Shift+minus move scratchpad
-
-# Show the next scratchpad window or hide the focused scratchpad window.
-# If there are multiple scratchpad windows, this command cycles through them.
-bindsym $mod+minus scratchpad show
-
-# Define names for default workspaces for which we configure key bindings later on.
-# We use variables to avoid repeating the names in multiple places.
+# ---------- 工作区（Workspace）定义与快捷键 ----------
+# 定义 10 个工作区名称
 set $ws1 "1"
-set $ws2 "2"
+set $ws2 "2 main"
 set $ws3 "3"
 set $ws4 "4"
 set $ws5 "5"
 set $ws6 "6"
 set $ws7 "7"
-set $ws8 "8"
-set $ws9 "9"
-set $ws10 "10"
+set $ws8 "8 porn"
+set $ws9 "9 mp3"
+set $ws10 "10 video record"
 
-# switch to workspace
+# $mod+数字 → 切换到对应工作区
 bindsym $mod+1 workspace number $ws1
 bindsym $mod+2 workspace number $ws2
 bindsym $mod+3 workspace number $ws3
@@ -151,7 +142,7 @@ bindsym $mod+8 workspace number $ws8
 bindsym $mod+9 workspace number $ws9
 bindsym $mod+0 workspace number $ws10
 
-# move focused container to workspace
+# $mod+Shift+数字 → 将当前容器移动到对应工作区
 bindsym $mod+Shift+1 move container to workspace number $ws1
 bindsym $mod+Shift+2 move container to workspace number $ws2
 bindsym $mod+Shift+3 move container to workspace number $ws3
@@ -163,54 +154,291 @@ bindsym $mod+Shift+8 move container to workspace number $ws8
 bindsym $mod+Shift+9 move container to workspace number $ws9
 bindsym $mod+Shift+0 move container to workspace number $ws10
 
-# reload the configuration file
-bindsym $mod+Shift+c reload
-# restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-bindsym $mod+Shift+r restart
-# exit i3 (logs you out of your X session)
-bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"
-
-# resize window (you can also use the mouse for that)
-mode "resize" {
-        # These bindings trigger as soon as you enter the resize mode
-
-        # Pressing left will shrink the window’s width.
-        # Pressing right will grow the window’s width.
-        # Pressing up will shrink the window’s height.
-        # Pressing down will grow the window’s height.
-        bindsym $left       resize shrink width 10 px or 10 ppt
-        bindsym $down       resize grow height 10 px or 10 ppt
-        bindsym $up         resize shrink height 10 px or 10 ppt
-        bindsym $right      resize grow width 10 px or 10 ppt
-
-        # same bindings, but for the arrow keys
-        bindsym Left        resize shrink width 10 px or 10 ppt
-        bindsym Down        resize grow height 10 px or 10 ppt
-        bindsym Up          resize shrink height 10 px or 10 ppt
-        bindsym Right       resize grow width 10 px or 10 ppt
-
-        # back to normal: Enter or Escape or $mod+r
-        bindsym Return mode "default"
-        bindsym Escape mode "default"
-        bindsym $mod+r mode "default"
-}
-
+# ---------- 调整窗口大小模式 ----------
+# 按 $mod+r 进入 resize 模式
 bindsym $mod+r mode "resize"
 
-# Start i3bar to display a workspace bar (plus the system information i3status
-# finds out, if available)
-bar {
-        status_command i3status
+mode "resize" {
+    # 使用 hjkl 或方向键调整窗口大小（单位：10像素或10%）
+    bindsym j resize shrink width 10 px or 10 ppt
+    bindsym k resize grow height 10 px or 10 ppt
+    bindsym l resize shrink height 10 px or 10 ppt
+    bindsym semicolon resize grow width 10 px or 10 ppt
+
+    bindsym Left resize shrink width 10 px or 10 ppt
+    bindsym Down resize grow height 10 px or 10 ppt
+    bindsym Up resize shrink height 10 px or 10 ppt
+    bindsym Right resize grow width 10 px or 10 ppt
+
+    # 按 Enter、Esc 或再次 $mod+r 退出 resize 模式
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+    bindsym $mod+r mode "default"
 }
 
-#######################################################################
-# automatically start i3-config-wizard to offer the user to create a
-# keysym-based config which used their favorite modifier (alt or windows)
-#
-# i3-config-wizard will not launch if there already is a config file
-# in ~/.config/i3/config (or $XDG_CONFIG_HOME/i3/config if set) or
-# ~/.i3/config.
-#
-# Please remove the following exec line:
-#######################################################################
-exec i3-config-wizard
+# ---------- 配置重载与退出 ----------
+# 配置热重载：hot_reload 默认开启，保存配置文件后自动重载，无需手动绑定。
+# NOTICE, if off, should manually set a reload keybind
+hot_reload on
+# 需要时仍可手动触发：
+bindsym $mod+Shift+r reload
+# restart 仅在更换 i3 二进制等场景需要，按需取消注释：
+# bindsym $mod+Shift+r restart
+# $mod+Shift+e：执行退出菜单（自定义脚本 dmenudock）
+bindsym $mod+Shift+e exec ~/.local/bin/qrdock
+
+# ---------- 状态栏（i3bar）配置 ----------
+bar {
+    # 状态栏位于屏幕底部
+    position bottom
+    # 使用自定义的 Go 状态栏程序
+    status_command /home/etcix/go/bin/i3statusgo
+    # 状态栏字体
+    font pango:DejaVu Sans Mono 10
+    # 配色由 i3ext.theme / i3ext.themes 提供；bar 块必须位于 i3ext 之前
+}
+
+# ============================================================
+# Hyprland / mangowc 移植功能（hypri3 定制版 i3）
+# 详细说明见 ~/code/probe/hypri3/i3/docs/hyprland-mangowc-config.zh.md
+# ============================================================
+
+# ---------- 扩展设置与键位（i3ext） ----------
+# 这些设置统一写在顶层 i3ext { ... } 块中（真正的 Lua 5.4 语法）：
+#   - 块内注释使用 --，字段之间必须用逗号
+#   - fork 扩展键位写在 binds 中；块外只保留上游 i3 和外部工具键位
+#   - 旧的 gaps_in / rounding / animations / dropdown_height 等原生指令
+#     仍然支持，但推荐只使用 i3ext；两者混用时按出现顺序后者覆盖
+i3ext {
+    -- 配色主题：切换整套 palette 只需修改下面这一行
+    --theme = "gruber_darker",
+    theme = "onedark",
+    -- 预定义主题：name -> { client = ..., bar = ... }
+    themes = {
+        gruber_darker = {
+            client = {
+                background = "#181818",
+                colors = {
+                    focused = { "#73d936", "#282828", "#e4e4e4", "#ffdd33", "#73d936" },
+                    focused_inactive = { "#52494e", "#181818", "#afafd7", "#52494e", "#52494e" },
+                    unfocused = { "#282828", "#181818", "#95a99f", "#282828", "#282828" },
+                    urgent = { "#f43841", "#181818", "#f43841", "#f43841", "#f43841" },
+                },
+                gradients = {
+                    focused = { "#73d936", "#96a6c8", 45 },
+                    focused_inactive = { "#52494e", "#282828", 45 },
+                    unfocused = { "#282828", "#181818", 45 },
+                    urgent = { "#f43841", "#ff4f58", 90 },
+                },
+            },
+            bar = {
+                background = "#181818",
+                statusline = "#e4e4e4",
+                separator = "#282828",
+                focused_workspace = { "#73d936", "#73d936", "#181818" },
+                active_workspace = { "#282828", "#282828", "#e4e4e4" },
+                inactive_workspace = { "#181818", "#181818", "#95a99f" },
+                urgent_workspace = { "#f43841", "#f43841", "#181818" },
+                binding_mode = { "#ffdd33", "#ffdd33", "#181818" },
+            },
+        },
+        md3 = {
+            client = {
+                background = "#141218",
+                colors = {
+                    focused = { "#d0bcff", "#211f26", "#e6e0e9", "#efb8c8", "#d0bcff" },
+                    focused_inactive = { "#49454f", "#1d1b20", "#cac4d0", "#938f99", "#49454f" },
+                    unfocused = { "#49454f", "#141218", "#938f99", "#2b2930", "#2b2930" },
+                    urgent = { "#f2b8b5", "#141218", "#f2b8b5", "#f2b8b5", "#f2b8b5" },
+                },
+                gradients = {
+                    focused = { "#d0bcff", "#efb8c8", 45 },
+                    focused_inactive = { "#49454f", "#2b2930", 45 },
+                    unfocused = { "#2b2930", "#141218", 45 },
+                    urgent = { "#f2b8b5", "#ffb4ab", 90 },
+                },
+            },
+            bar = {
+                background = "#141218",
+                statusline = "#e6e0e9",
+                separator = "#49454f",
+                focused_workspace = { "#d0bcff", "#d0bcff", "#381e72" },
+                active_workspace = { "#2b2930", "#2b2930", "#e6e0e9" },
+                inactive_workspace = { "#141218", "#141218", "#938f99" },
+                urgent_workspace = { "#f2b8b5", "#f2b8b5", "#141218" },
+                binding_mode = { "#efb8c8", "#efb8c8", "#141218" },
+            },
+        },
+        onedark = {
+            client = {
+                background = "#1e2227",
+                colors = {
+                    focused = { "#61afef", "#21252b", "#abb2bf", "#e5c07b", "#61afef" },
+                    focused_inactive = { "#3e4451", "#282c34", "#9da5b4", "#5c6370", "#3e4451" },
+                    unfocused = { "#3e4451", "#1e2227", "#5c6370", "#3e4451", "#3e4451" },
+                    urgent = { "#e06c75", "#282c34", "#e06c75", "#e06c75", "#e06c75" },
+                },
+                gradients = {
+                    focused = { "#61afef", "#c678dd", 45 },
+                    focused_inactive = { "#3e4451", "#282c34", 45 },
+                    unfocused = { "#3e4451", "#1e2227", 45 },
+                    urgent = { "#e06c75", "#d19a66", 90 },
+                },
+            },
+            bar = {
+                background = "#21252b",
+                statusline = "#abb2bf",
+                separator = "#3e4451",
+                focused_workspace = { "#61afef", "#61afef", "#21252b" },
+                active_workspace = { "#3e4451", "#3e4451", "#abb2bf" },
+                inactive_workspace = { "#1e2227", "#1e2227", "#5c6370" },
+                urgent_workspace = { "#e06c75", "#e06c75", "#21252b" },
+                binding_mode = { "#c678dd", "#c678dd", "#21252b" },
+            },
+        },
+        dracula = {
+            client = {
+                background = "#191a21",
+                colors = {
+                    focused = { "#bd93f9", "#282a36", "#f8f8f2", "#ff79c6", "#bd93f9" },
+                    focused_inactive = { "#44475a", "#21222c", "#bfbfbf", "#6272a4", "#44475a" },
+                    unfocused = { "#44475a", "#191a21", "#6272a4", "#44475a", "#44475a" },
+                    urgent = { "#ff5555", "#282a36", "#ff5555", "#ff5555", "#ff5555" },
+                },
+                gradients = {
+                    focused = { "#bd93f9", "#8be9fd", 45 },
+                    focused_inactive = { "#44475a", "#21222c", 45 },
+                    unfocused = { "#44475a", "#191a21", 45 },
+                    urgent = { "#ff5555", "#ffb86c", 90 },
+                },
+            },
+            bar = {
+                background = "#21222c",
+                statusline = "#f8f8f2",
+                separator = "#44475a",
+                focused_workspace = { "#bd93f9", "#bd93f9", "#21222c" },
+                active_workspace = { "#44475a", "#44475a", "#f8f8f2" },
+                inactive_workspace = { "#191a21", "#191a21", "#6272a4" },
+                urgent_workspace = { "#ff5555", "#ff5555", "#21222c" },
+                binding_mode = { "#ff79c6", "#ff79c6", "#21222c" },
+            },
+        },
+        catppuccin_mocha = {
+            client = {
+                background = "#11111b",
+                colors = {
+                    focused = { "#89b4fa", "#1e1e2e", "#cdd6f4", "#f9e2af", "#89b4fa" },
+                    focused_inactive = { "#45475a", "#181825", "#bac2de", "#585b70", "#45475a" },
+                    unfocused = { "#313244", "#11111b", "#7f849c", "#313244", "#313244" },
+                    urgent = { "#f38ba8", "#181825", "#f38ba8", "#f38ba8", "#f38ba8" },
+                },
+                gradients = {
+                    focused = { "#89b4fa", "#cba6f7", 45 },
+                    focused_inactive = { "#45475a", "#313244", 45 },
+                    unfocused = { "#313244", "#1e1e2e", 45 },
+                    urgent = { "#f38ba8", "#eba0ac", 90 },
+                },
+            },
+            bar = {
+                background = "#11111b",
+                statusline = "#cdd6f4",
+                separator = "#313244",
+                focused_workspace = { "#89b4fa", "#89b4fa", "#11111b" },
+                active_workspace = { "#313244", "#313244", "#cdd6f4" },
+                inactive_workspace = { "#11111b", "#11111b", "#6c7086" },
+                urgent_workspace = { "#f38ba8", "#f38ba8", "#11111b" },
+                binding_mode = { "#f9e2af", "#f9e2af", "#11111b" },
+            },
+        },
+    },
+    -- fork 扩展功能键位（块外只保留上游 i3 与外部工具键位）
+    binds = {
+        -- 通用下拉窗口
+        { key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
+        { key = "Mod4+Shift+backslash", command = "dropdown recall" },
+        -- 标题栏切换
+        { key = "Mod4+Shift+t", command = "titlebar toggle" },
+        -- 浮动窗口居中
+        { key = "Mod4+c", command = "centerwindow" },
+        -- 浮动窗口四分屏
+        { key = "Mod4+Ctrl+1", command = "snap top-left" },
+        { key = "Mod4+Ctrl+2", command = "snap top-right" },
+        { key = "Mod4+Ctrl+3", command = "snap bottom-left" },
+        { key = "Mod4+Ctrl+4", command = "snap bottom-right" },
+        -- 方向键贴边/聚焦（平铺窗口下 snap 退化为 focus）
+        { key = "Mod4+Left", command = "snap left" },
+        { key = "Mod4+Down", command = "snap down" },
+        { key = "Mod4+Up", command = "snap up" },
+        { key = "Mod4+Right", command = "snap right" },
+        -- 布局扩展
+        { key = "Mod4+m", command = "layout master" },
+        { key = "Mod4+t", command = "layout dwindle" },
+        { key = "Mod4+s", command = "layout scroller" },
+        { key = "Mod4+equal", command = "layoutmsg proportion +0.05" },
+        { key = "Mod4+minus", command = "layoutmsg proportion -0.05" },
+        -- 缩略图窗口切换器（niri/mangowc 风格）
+        { key = "Mod1+Tab", command = "switcher next" },
+        { key = "Mod1+Shift+Tab", command = "switcher prev" },
+        -- 冻结模式（松开修饰键不确认，需手动结束）：
+        -- { key = "Mod1+Tab", command = "switcher next sticky" },
+        -- { key = "Mod1+Shift+Tab", command = "switcher prev sticky" },
+    },
+    gaps = {
+        inner = 8,
+        outer = 0,
+    },
+    decoration = {
+        rounding = 8,
+        border_size = 2,
+    },
+    opacity = {
+        active = 1.0,
+        inactive = 0.92,
+        dim_inactive = true,
+        dim_strength = 0.10,
+    },
+    titlebar = {
+        align = "center",
+        height = 20,
+        padding = 8,
+        font = "pango:monospace 24",
+        visibility = "normal",
+    },
+    animations = {
+        enabled = true,
+        beziers = {
+            myQuint = { 0.23, 1.0, 0.32, 1.0 },
+        },
+        windows = { duration = 180, curve = "myQuint" },
+        open = { duration = 220, curve = "easeOutQuint" },
+        close = { duration = 150, curve = "easeOutQuint" },
+        fade_in = true,
+        workspaces = { duration = 300, curve = "easeOutQuint" },
+        dropdown = { duration = 250, curve = "easeOutQuint" },
+    },
+    -- 通用下拉窗口：顶部、宽度铺满工作区、高度 40%
+    dropdown = {
+        height = 0.40,
+        position = "top",
+    },
+    layouts = {
+        master = { ratio = 0.6, orientation = "left" },
+        dwindle = { split_ratio = 0.5 },
+        scroller = {
+            proportion = 0.9,
+            structs = 20,
+            focus_center = false,
+            prefer_center = false,
+            prefer_overspread = true,
+            ignore_proportion_single = true,
+            default_proportion_single = 1.0,
+            autofit = true,
+        },
+    },
+}
+
+# ---------- 上游命令键位（保留在原生配置） ----------
+# $mod+u：切换当前窗口边框（无边框 ↔ 有边框）
+bindsym $mod+u border toggle
+# 其余 fork 扩展键位（titlebar、dropdown、layout、snap、switcher 等）
+# 已迁移到上方 i3ext.binds；tabbed / toggle split / resize 等上游键位留在前面。

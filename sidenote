@@ -1,2 +1,14 @@
 test by `meson test`
 rm debian/ folder, use github release only
+
+local develop build
+```bash
+meson setup build
+
+ninja -C build
+
+cd build
+ninja install
+# or nest window to test, require Xephyr program, install it first
+./i3 --nest
+```

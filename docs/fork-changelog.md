@@ -423,28 +423,27 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 
 ### 2. `--nest` 测试模式增强（`src/main.c`、`src/bindings.c`）
 
-`i3 --nest[=DISPLAY]`：在私有全屏 Xephyr（默认 `:99`）里跑一个完整 i3 会话，
-用于在 Hyprland 下安全测试。
+`i3 --nest[=DISPLAY]`：在私有 Xephyr 窗口（默认自动挑选空闲 display，从 `:99`
+向下找；窗口 1280x800）里跑一个完整 i3 会话，用于在其它桌面下安全测试。
 
-- **mod 冲突解决**（`duplicate_bindings_for_nest_mode()`）：Wayland 宿主的
-  键位绑定在 seat 层先于 XWayland 处理，Xephyr 抓取无法绕过；而 XKB 层面
-  交换 Alt/Super（setxkbmap altwin:swap_alt_win）在本机 TinyX Xephyr 上会
-  留下脏的兼容修饰位（state 混入 Mod1|Mod2|Mod4，XGrabKey 精确匹配永不
-  命中）。最终方案：nest 子进程设置 `I3_NEST=1` 环境变量，i3 在初始加载与
-  每次 reload 后把所有 Mod4 键位绑定自动复制一份 Mod1（Alt）变体并一并
-  translate/grab——物理 Alt 触发配置里 `$mod`（Super）的键位，配置文件
-  零改动，Hyprland 只绑 Super 故零冲突。
-- **按宿主类型自动启用 Alt 别名**：`I3_NEST` 不再无条件设置。启动时先检测
-  宿主会话（`WAYLAND_DISPLAY`/`WAYLAND_SOCKET`/`XDG_SESSION_TYPE`）：
-  - X11 宿主：不生成 Mod1 副本。Xephyr 的 `Ctrl+Shift` 是真正的
-    `XGrabKeyboard`，抓取后宿主 i3 的 Mod4 passive grab 不再生效，嵌套里
-    使用真实的 `$mod` 即可；不再出现“Alt+Return 也能开终端”这类额外别名冲突。
-  - Wayland 宿主：保留 Mod1 副本（compositor 层 Super 无法被 Xephyr 绕过）。
-  启动时会在 stderr 提示 `Ctrl+Shift` 抓取/释放键盘的含义。
+- **不再生成任何 Alt 别名**：早期实现用 `I3_NEST` 环境变量把所有 Mod4 绑定
+  复制成一份 Mod1（Alt）副本，导致“nest 里按 Alt+Return 也会打开终端”这种
+  与真机不一致的行为。该机制（`duplicate_bindings_for_nest_mode()`）已整体
+  删除，嵌套会话里的键位与真机配置逐字一致：`$mod` 就是 `$mod`。
+- **键盘交接给 Xephyr**：Xephyr 在其窗口获得焦点时会发起真正的
+  `XGrabKeyboard`，抓取期间宿主 WM 的 passive grab（含宿主的 Alt+Tab）不再
+  生效。因此启动后父进程会等待 Xephyr 窗口 map，用独立的宿主 X 连接
+  `xcb_set_input_focus` 把焦点交给它，并把指针挪到窗口中心（兼容
+  `focus_follows_mouse`），无需用户先点一下窗口。窗口用
+  `-name i3-nest-<display>` 标记（WM_CLASS），多开时不会认错窗口。
+- **静态与隔离**：嵌套会话有独立的 display、独立 `XDG_RUNTIME_DIR`、独立
+  dbus-daemon；`unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设
+  `XDG_SESSION_TYPE=x11`，客户端不会跑回宿主 Wayland 桌面。Linux 下 Xephyr
+  默认抓取键盘，`Ctrl+Shift` 切换抓取/释放，启动时在 stderr 说明。
+- **已知限制**：宿主若是 Wayland compositor，其 compositor 层的全局快捷键
+  在 XWayland 之前处理，Xephyr 抓取无法拦截；这一点无法从 i3 一侧解决。
 - 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的
   `/usr/local` libxkbcommon（re-exec 前置 `/usr/lib/x86_64-linux-gnu`）。
-- **会话隔离**：子进程额外 `unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设
-  `XDG_SESSION_TYPE=x11`，否则宿主 Wayland 会被客户端优先选中。
 
 ### 3. 视觉默认值（`src/config.c`）
 

@@ -443,44 +443,6 @@ static void add_keycode_if_matches(struct xkb_keymap *keymap, xkb_keycode_t key,
 }
 
 /*
- * Duplicates every keyboard binding that uses Super (Mod4) with an Alt
- * (Mod1) variant. Used by --nest test mode: the host compositor usually
- * owns Super and consumes the real keypresses, while Alt is typically
- * unbound there. The duplicates are re-translated along with all other
- * bindings by the following translate_keysyms() call.
- *
- */
-void duplicate_bindings_for_nest_mode(void) {
-    struct Mode *mode;
-    SLIST_FOREACH (mode, &modes, modes) {
-        Binding *bind;
-        TAILQ_FOREACH (bind, mode->bindings, bindings) {
-            if (bind->input_type != B_KEYBOARD ||
-                (bind->event_state_mask & XCB_MOD_MASK_4) == 0) {
-                continue;
-            }
-            Binding *duplicate = scalloc(1, sizeof(Binding));
-            duplicate->input_type = bind->input_type;
-            duplicate->release = bind->release;
-            duplicate->border = bind->border;
-            duplicate->whole_window = bind->whole_window;
-            duplicate->exclude_titlebar = bind->exclude_titlebar;
-            duplicate->keycode = bind->keycode;
-            /* Keep the XKB group bits (high 16 bits) intact and swap the
-             * modifier: physical Alt triggers what the config binds to
-             * Super. */
-            duplicate->event_state_mask =
-                (bind->event_state_mask & ~XCB_MOD_MASK_4) | XCB_MOD_MASK_1;
-            duplicate->symbol = bind->symbol != NULL ? sstrdup(bind->symbol) : NULL;
-            TAILQ_INIT(&duplicate->keycodes_head);
-            duplicate->command = sstrdup(bind->command);
-            TAILQ_INSERT_TAIL(mode->bindings, duplicate, bindings);
-            DLOG("nest mode: duplicated binding \"%s\" with Mod1\n", bind->symbol ? bind->symbol : bind->command);
-        }
-    }
-}
-
-/*
  * Translates keysymbols to keycodes for all bindings which use keysyms.
  *
  */

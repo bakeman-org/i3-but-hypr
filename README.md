@@ -13,6 +13,7 @@ eget https://github.com/bakeman-org/i3-but-hypr
 - debain/ folder is not going to maintain, remove and just let github do release thing
 - old testcases by perl is not going to maintain, I'm not going to test the program by perl
 - docs is not going to update, and will just add my own changes
+- always sync local config to here to test, and if something change at ./etc/config, copy back to your system
 - latter I will remove unused things...
 
 # ref links & idea inspired by
