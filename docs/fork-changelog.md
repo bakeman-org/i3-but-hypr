@@ -457,6 +457,20 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
   dbus-daemon；`unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设
   `XDG_SESSION_TYPE=x11`，客户端不会跑回宿主 Wayland 桌面。Linux 下 Xephyr
   默认抓取键盘，`Ctrl+Shift` 切换抓取/释放，启动时在 stderr 说明。
+- **进程级隔离（PID namespace）**：嵌套实例经
+  `unshare --user --map-current-user --pid --fork --mount-proc` 重执行（
+  `nest_enter_pid_namespace()`），拥有私有 `/proc`——嵌套会话里的
+  `killall`/`pkill`/`ps` 只能看到嵌套进程（此前在嵌套终端里跑
+  `killall st` 会把宿主终端一起杀掉），也无法按 PID 触达宿主进程。
+  内层 i3 成为 namespace 的 PID 1，孤儿进程由 libev 默认 loop 统一
+  回收（与上游行为一致），无僵尸积累。Xephyr 仍在 namespace 外由
+  父进程管理，经共享的 `/tmp/.X11-unix` socket 连接。
+  实现细节：必须在进入 unshare 前用 `readlink(/proc/self/exe)` 解析
+  i3 真实路径（exec 时刻 `/proc/self` 指向 unshare 自己，直接传
+  `/proc/self/exe` 会递归执行 unshare）；re-exec 参数中过滤
+  `--nest*`，附带修复了 nest 内就地 restart 会重入 `nest_run()` 而失败
+  的问题。unshare 缺失或非特权 user namespace 被禁用（sysctl/AppArmor）
+  时自动降级为无 namespace 运行（探测子进程静默失败后打日志）。
 - **已知限制**：宿主若是 Wayland compositor，其 compositor 层的全局快捷键
   在 XWayland 之前处理，Xephyr 抓取无法拦截；这一点无法从 i3 一侧解决。
 - 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的

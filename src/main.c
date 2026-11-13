@@ -456,6 +456,117 @@ static void nest_isolate_session(void) {
     LOG("nest mode: private session bus on %s\n", nest_buspath);
 }
 
+/*
+ * Runs the nested i3 inside a private PID (and user) namespace.
+ *
+ * Process-management tools (killall, pkill, ps) enumerate processes via
+ * /proc, which the nest shares with the host session; running e.g.
+ * "killall st" in a nested terminal therefore kills the host's terminals
+ * as well. Mounting a namespace-private /proc (unshare --mount-proc)
+ * confines them to the nested session's processes. As a bonus, the nested
+ * instance cannot reach host processes by raw PID.
+ *
+ * The nested i3 becomes PID 1 of its namespace. That is safe: libev's
+ * default loop reaps arbitrary dead children (see the SIGCHLD handling
+ * around ev_loop()), so orphans do not accumulate as zombies.
+ *
+ * Xephyr stays outside the namespace (the supervisor spawns it) and is
+ * reached over the shared /tmp/.X11-unix socket; filesystem paths like
+ * XDG_RUNTIME_DIR and D-Bus continue to work the same way.
+ *
+ * Requires unshare(1) with unprivileged user namespaces (sometimes
+ * disabled via sysctl or AppArmor); falls back to running without
+ * isolation otherwise.
+ *
+ */
+static void nest_enter_pid_namespace(void) {
+    if (getenv("I3_NEST_INNER") != NULL) {
+        return;
+    }
+
+    const char *unshare = NULL;
+    static const char *paths[] = {"/usr/bin/unshare", "/bin/unshare", "/usr/sbin/unshare", NULL};
+    for (int i = 0; paths[i] != NULL; i++) {
+        if (access(paths[i], X_OK) == 0) {
+            unshare = paths[i];
+            break;
+        }
+    }
+    if (unshare == NULL) {
+        LOG("nest mode: unshare(1) not found, running without PID namespace isolation\n");
+        return;
+    }
+
+    /* Probe that user namespaces actually work on this system. The probe
+     * child's stderr is silenced: unshare's diagnostics would be noise
+     * when isolation is simply unavailable. */
+    pid_t probe = fork();
+    if (probe == -1) {
+        LOG("nest mode: fork for unshare probe failed, running without PID namespace isolation\n");
+        return;
+    }
+    if (probe == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull != -1) {
+            dup2(devnull, STDERR_FILENO);
+        }
+        execl(unshare, "unshare", "--user", "--map-current-user", "--pid",
+              "--fork", "--mount-proc", "/bin/true", (char *)NULL);
+        _exit(127);
+    }
+    int status;
+    if (waitpid(probe, &status, 0) != probe || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        LOG("nest mode: user/PID namespaces unavailable, running without PID namespace isolation\n");
+        return;
+    }
+
+    /* Re-exec ourselves inside the namespace. The --nest options are
+     * dropped so that the inner instance starts as a regular i3 — this
+     * also makes in-place restarts work, which would otherwise re-enter
+     * nest_run() and fail because the display is already in use. */
+    int argc = 0;
+    while (start_argv[argc] != NULL) {
+        argc++;
+    }
+    /* Resolve our own binary path NOW: /proc/self/exe would be resolved
+     * relative to the unshare process at exec time (pointing at unshare
+     * itself), not to i3. */
+    char exe_path[4096];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len <= 0) {
+        LOG("nest mode: readlink(/proc/self/exe) failed, running without PID namespace isolation\n");
+        return;
+    }
+    exe_path[len] = '\0';
+
+    char **argv = scalloc(argc + 8, sizeof(char *));
+    int out = 0;
+    argv[out++] = (char *)"unshare";
+    argv[out++] = (char *)"--user";
+    argv[out++] = (char *)"--map-current-user";
+    argv[out++] = (char *)"--pid";
+    argv[out++] = (char *)"--fork";
+    argv[out++] = (char *)"--mount-proc";
+    argv[out++] = exe_path;
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(start_argv[i], "--nest", strlen("--nest")) == 0) {
+            continue;
+        }
+        argv[out++] = start_argv[i];
+    }
+    argv[out] = NULL;
+
+    /* Marker for the inner instance (and any later in-place restarts of
+     * it): never try to enter the namespace again. */
+    setenv("I3_NEST_INNER", "1", 1);
+    execv(unshare, argv);
+    /* execv only returns on error. */
+    LOG("nest mode: exec unshare failed (%s), running without PID namespace isolation\n",
+        strerror(errno));
+    unsetenv("I3_NEST_INNER");
+    FREE(argv);
+}
+
 /* Returns true if the given window is the Xephyr instance spawned by --nest.
  * Xephyr is started with -name i3-nest-<display>, which ends up in WM_CLASS. */
 static bool nest_is_xephyr_window(xcb_connection_t *host, xcb_window_t win, const char *name) {
@@ -624,6 +735,9 @@ static void nest_run(void) {
                 "nest mode: the keyboard is captured by Xephyr while its window has the focus.\n"
                 "nest mode: press Ctrl+Shift to release it to the host, press again to re-grab.\n"
                 "nest mode: a Wayland host compositor may still consume its own global shortcuts.\n");
+        /* Process isolation: keep killall/pkill/ps inside the nest from
+         * seeing (and killing) host processes. */
+        nest_enter_pid_namespace();
         return;
     }
 
