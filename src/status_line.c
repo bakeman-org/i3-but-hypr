@@ -156,7 +156,9 @@ static void build_text(char *buf, size_t len) {
         }
         if (con_is_floating(target)) {
             state = " floating";
-        } else if (target->fullscreen_mode != CF_NONE) {
+        } else if (target->window != NULL && target->fullscreen_mode != CF_NONE) {
+            /* Workspaces also carry CF_OUTPUT (they mark the visible
+             * workspace), so only a real window can be fullscreen. */
             state = " fullscreen";
         } else {
             state = " tiled";

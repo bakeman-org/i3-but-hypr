@@ -1338,13 +1338,19 @@ void x_push_node(Con *con) {
     Con *current;
     con_state *state = state_for_frame(con->frame.id);
 
-    /* A container that is neither mapped in the tree nor mapped in X11 belongs
-     * to a hidden workspace (or to an unmapped scratchpad container). Nothing
-     * inside it can become visible without this container being rendered as
-     * mapped first, so the whole subtree can be skipped. This keeps the work
-     * per render (animations run at frame rate) proportional to the visible
-     * windows instead of all windows on all workspaces. */
-    if (!con->mapped && !state->mapped) {
+    /* A leaf window that is neither mapped in the tree nor mapped in X11
+     * cannot become visible without being rendered as mapped first, so it can
+     * be skipped. This keeps the work per render (animations run at frame
+     * rate) proportional to the visible windows.
+     *
+     * Do NOT skip non-window containers: i3 frames are children of the root
+     * window, not of their parent container's frame, so an unmapped workspace
+     * or split container may still have mapped leaf descendants. Skipping
+     * them left the old workspace's windows visible after a workspace
+     * switch. */
+    if (con->window != NULL && !con->mapped && !state->mapped) {
+        /* No unmap is pending for a window that is already hidden. */
+        state->unmap_now = false;
         return;
     }
 
@@ -1710,9 +1716,10 @@ static void x_push_node_unmaps(Con *con) {
     Con *current;
     con_state *state = state_for_frame(con->frame.id);
 
-    /* See x_push_node(): an already unmapped subtree cannot contain a frame
-     * that still needs to be unmapped. */
-    if (!state->mapped && !con->mapped) {
+    /* Only leaf windows can be skipped: non-window containers are never
+     * mapped themselves, but their leaf descendants may still be mapped (i3
+     * frames live on the root window). See x_push_node(). */
+    if (con->window != NULL && !state->mapped && !con->mapped) {
         return;
     }
 
