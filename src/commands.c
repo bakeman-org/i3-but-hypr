@@ -1689,7 +1689,19 @@ void cmd_layout(I3_CMD, const char *layout_str) {
             }
             Con *target = ws;
             if (con_num_children(ws) == 1) {
-                target = TAILQ_FIRST(&(ws->nodes_head));
+                Con *child = TAILQ_FIRST(&(ws->nodes_head));
+                if (con_is_leaf(child)) {
+                    /* A single window cannot hold the layout itself: setting it
+                     * on the leaf would have no visible effect and windows
+                     * opened later would tile next to it instead of becoming
+                     * columns. Wrap it once, like for multiple windows. */
+                    target = workspace_encapsulate(ws);
+                    if (target == NULL) {
+                        target = ws;
+                    }
+                } else {
+                    target = child;
+                }
             } else if (con_num_children(ws) > 1) {
                 target = workspace_encapsulate(ws);
                 if (target == NULL) {
