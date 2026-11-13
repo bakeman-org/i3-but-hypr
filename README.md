@@ -1,20 +1,18 @@
 # NOTICE(AI SLOP)
 - LLM driven code, if you do mind llm, please don't use or it will break your system and family.
 
-# get from github release by eget(a go program TODO a link)
-```bash
-eget https://github.com/bakeman-org/i3-but-hypr
-```
+# get .deb file from github release
+- https://github.com/bakeman-org/i3-but-hypr
 
 ## develop notice
-- i3-config-wizard is not going to maintain
-- man page is not going to maintain
-- AnyEvent-I3 is not going to maintain
-- debain/ folder is not going to maintain, remove and just let github do release thing
-- old testcases by perl is not going to maintain, I'm not going to test the program by perl
-- docs is not going to update, and will just add my own changes
-- always sync local config to here to test, and if something change at ./etc/config, copy back to your system
-- latter I will remove unused things...
+- i3-config-wizard and the man pages are removed, they are not maintained
+- AnyEvent-I3 and the old Perl testcases are removed; only the C parser / i3ext
+  tests remain (`meson test -C build`)
+- the `debian/` folder is gone, releases are built and published by GitHub Actions
+- `docs/` only holds this fork's own documentation; upstream docs are not updated
+- `etc/config` is the reference config: copy it to `~/.config/i3/config` to try
+  changes (`make __sample_config_push`), or copy your local config back with
+  `make __sync_local_config`
 
 # ref links & idea inspired by
 - hyprland's animation ...

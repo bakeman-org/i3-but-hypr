@@ -61,10 +61,10 @@ binds = {
 - 原生写法示例（留在块外）：`bindsym $mod+u border toggle`、
   `bindsym $mod+Return exec st`、`bindsym $mod+j focus left`。
 
-### 配色主题 `theme` / `themes` / `bar`
+### 配色主题 `theme` / `themes` / `client` / `bar` / `switcher`
 
 可以把多套 palette 定义在块内，并用一行 `theme` 切换。主题同时覆盖窗口
-titlebar/border 与 i3bar 颜色：
+titlebar/border、i3bar 与 Alt+Tab 切换器（`switcher`）的颜色：
 
 ```lua
 theme = "gruber_darker",      -- 省略时默认为 gruber_darker
@@ -91,26 +91,37 @@ themes = {
             urgent_workspace = { "#f43841", "#f43841", "#181818" },
             binding_mode = { "#ffdd33", "#ffdd33", "#181818" },
         },
+        switcher = {
+            background = "#181818",              -- 切换器面板底色
+            bar = { "#282828", "#e4e4e4" },      -- 标题栏 { 底色, 文字色 }
+            tile = { "#181818", "#e4e4e4" },     -- 无缩略图贴图 { 底色, 文字色 }
+        },
     },
     -- md3 / onedark / dracula / catppuccin_mocha ...
 },
 ```
 
-- `themes` 中的每个主题只允许 `client`、`bar` 两个键；`client` 与顶层
+- `themes` 中的每个主题只允许 `client`、`bar`、`switcher` 三个键；`client` 与顶层
   `client` 形状相同（background / colors / gradients），`bar` 支持
   `background`、`statusline`、`separator`、`focused_background`、
   `focused_statusline`、`focused_separator`，以及 `focused_workspace`、
   `active_workspace`、`inactive_workspace`、`urgent_workspace`、
   `binding_mode` 三元组（border / background / text）。
+- `switcher` 只允许 `background`、`bar`、`tile` 三个键：`background` 是面板底色，
+  `bar` / `tile` 各是 `{ 底色, 文字色 }` 二色数组。未配置的项回退到 `client`
+  颜色：面板 → `client.background`，标题栏 → `client.focused` 的
+  background / text（不是 border，避免高亮色当底色导致文字看不清），
+  贴图 → `client.unfocused` 的 background / text。缩略图选中边框仍用
+  `client.focused` 的边框或渐变，因此切换器与窗口装饰风格一致。
 - 只要定义了 `themes` 且省略 `theme`，就使用默认主题 `gruber_darker`；
   默认主题未定义或 `theme` 指向不存在的主题都会使 `i3 -C` 失败。
 - 所有主题都会被完整校验（未知键、类型、颜色格式），不只是当前选中的主题。
 - i3bar 配色会应用到 `barconfigs` 中的**所有** bar 配置；因此原生的
   `bar { ... }` 块必须写在 `i3ext` 之前，且必须存在 bar 配置，否则报错。
-- 顶层 `client` / `bar` 仍然支持，作为主题之后的覆盖项。应用顺序为：
-  `binds` → 主题 `client` → 主题 `bar` → `gaps` → `decoration` → `opacity`
-  → `titlebar` → 顶层 `client` → 顶层 `bar` → `animations` → `dropdown`
-  → `layouts`。
+- 顶层 `client` / `bar` / `switcher` 仍然支持，作为主题之后的覆盖项。应用顺序为：
+  `binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` → `gaps` → `decoration`
+  → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` → 顶层 `switcher`
+  → `animations` → `dropdown` → `layouts`。
 - 用户配置内置示例主题：`gruber_darker`（默认）、`md3`、`onedark`、
   `dracula`、`catppuccin_mocha`。切换整套配色只需修改 `theme` 一行。
 
@@ -134,6 +145,11 @@ i3ext {
                 gradients = { focused = { "#73d936", "#96a6c8", 45 } },
             },
             bar = { background = "#181818", focused_workspace = { "#73d936", "#73d936", "#181818" } },
+            switcher = {
+                background = "#181818",
+                bar = { "#282828", "#e4e4e4" },
+                tile = { "#181818", "#e4e4e4" },
+            },
         },
     },
     bar = {
@@ -220,9 +236,10 @@ i3ext {
 - `layouts.scroller.ignore_proportion_single` 对应旧原生指令的
   `scroller_ignore_proportion_single`（内部取反后存入
   `scroller_proportion_single`）。
-- 应用顺序固定为：`binds` → 主题 `client` → 主题 `bar` → `gaps` →
-  `decoration` → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` →
-  `animations` → `dropdown` → `layouts`，因此与顺序相关的副作用稳定可复现。
+- 应用顺序固定为：`binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` →
+  `gaps` → `decoration` → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar`
+  → 顶层 `switcher` → `animations` → `dropdown` → `layouts`，因此与顺序相关的
+  副作用稳定可复现。
 
 ### 错误与校验
 

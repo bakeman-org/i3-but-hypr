@@ -1,3 +1,7 @@
+This is for personal using!!!
+this means some softwares some side utilities is not going to maintain.
+I should keep this program mainly focus on i3wm and i3bar stuff ...
+
 test by `meson test`
 rm debian/ folder, use github release only
 
@@ -11,4 +15,12 @@ cd build
 ninja install
 # or nest window to test, require Xephyr program, install it first
 ./i3 --nest
+
+# use ctrl + shift to jump into Xephyr, ctrl + shift to skip out Xephyr when testing this wm looks like
+
+# a good software should have a builtin debug system, which means --nest is the debug entry, I will take screenshot by --nest
 ```
+
+Extended at config must in the i3ext {} block
+
+

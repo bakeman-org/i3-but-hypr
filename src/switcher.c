@@ -73,6 +73,45 @@ static void modifier_tick_cb(EV_P_ ev_timer *w, int revents);
 #define SW_MODIFIER_POLL 0.05
 
 /******************************************************************************
+ * Theme
+ ******************************************************************************/
+
+/* Effective switcher colors: configured with switcher_background/_bar/_tile,
+ * or derived from the client colors so that the panel always follows the
+ * active palette. The configured title bar colors default to the title bar
+ * pairing (background + text) of the focused window instead of its border
+ * color: a border is usually a bright accent and unreadable as a text
+ * background. */
+static color_t switcher_color(uint32_t bit, color_t configured, color_t fallback) {
+    return (config.switcher.set & bit) ? configured : fallback;
+}
+
+static color_t switcher_panel_background(void) {
+    return switcher_color(SWITCHER_COLOR_BACKGROUND, config.switcher.background,
+                          config.client.background);
+}
+
+static color_t switcher_bar_background(void) {
+    return switcher_color(SWITCHER_COLOR_BAR_BACKGROUND, config.switcher.bar_background,
+                          config.client.focused.background);
+}
+
+static color_t switcher_bar_text(void) {
+    return switcher_color(SWITCHER_COLOR_BAR_TEXT, config.switcher.bar_text,
+                          config.client.focused.text);
+}
+
+static color_t switcher_tile_background(void) {
+    return switcher_color(SWITCHER_COLOR_TILE_BACKGROUND, config.switcher.tile_background,
+                          config.client.unfocused.background);
+}
+
+static color_t switcher_tile_text(void) {
+    return switcher_color(SWITCHER_COLOR_TILE_TEXT, config.switcher.tile_text,
+                          config.client.unfocused.text);
+}
+
+/******************************************************************************
  * Candidate collection
  ******************************************************************************/
 
@@ -393,7 +432,7 @@ static void draw_preview(struct switcher_candidate *c, int x, int y, int w, int 
     cairo_save(cr);
 
     /* Fill the preview area with the tile background first. */
-    draw_util_rectangle(surface, config.client.unfocused.background, x, y, w, h);
+    draw_util_rectangle(surface, switcher_tile_background(), x, y, w, h);
 
     if (c->image != NULL) {
         const int iw = c->img_w > 0 ? c->img_w : cairo_image_surface_get_width(c->image);
@@ -412,8 +451,8 @@ static void draw_preview(struct switcher_candidate *c, int x, int y, int w, int 
     } else {
         /* Fallback: a large, dimmed window title inside the tile. */
         i3String *title = candidate_title_i3(c);
-        draw_util_text(title, surface, config.client.unfocused.text,
-                       config.client.unfocused.background,
+        draw_util_text(title, surface, switcher_tile_text(),
+                       switcher_tile_background(),
                        x + logical_px(8), y + h / 2 - config.font.height / 2, w - logical_px(16));
         i3string_free(title);
     }
@@ -470,7 +509,7 @@ static void draw_panel(void) {
 
     surface_t *surface = &(sw.panel_surface);
 
-    draw_util_rectangle(surface, config.client.background, 0, 0, sw.geo.panel_w, sw.geo.panel_h);
+    draw_util_rectangle(surface, switcher_panel_background(), 0, 0, sw.geo.panel_w, sw.geo.panel_h);
 
     for (int i = 0; i < sw.count; i++) {
         draw_tile(i);
@@ -479,16 +518,15 @@ static void draw_panel(void) {
     /* Shared title bar below the tiles: shows the title of the currently
      * selected window (mangowc's title_message_bar). */
     struct switcher_candidate *sel = &(sw.candidates[sw.index]);
-    const struct Colortriple *colors = &(config.client.focused);
     const int bar_y = sw.geo.panel_h - sw.geo.title_h;
-    draw_util_rectangle(surface, colors->border, 0, bar_y, sw.geo.panel_w, sw.geo.title_h);
+    draw_util_rectangle(surface, switcher_bar_background(), 0, bar_y, sw.geo.panel_w, sw.geo.title_h);
     i3String *sel_title = candidate_title_i3(sel);
     const int text_w = predict_text_width(sel_title);
     int text_x = (sw.geo.panel_w - text_w) / 2;
     if (text_x < logical_px(8)) {
         text_x = logical_px(8);
     }
-    draw_util_text(sel_title, surface, colors->text, colors->border,
+    draw_util_text(sel_title, surface, switcher_bar_text(), switcher_bar_background(),
                    text_x, bar_y + (sw.geo.title_h - config.font.height) / 2,
                    sw.geo.panel_w - text_x - logical_px(8));
     i3string_free(sel_title);

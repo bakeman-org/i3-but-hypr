@@ -29,7 +29,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             meson ninja-build build-essential pkg-config git ca-certificates curl \
-            jq gettext asciidoc xmlto docbook-xml libpod-simple-perl \
+            jq gettext \
             libx11-dev libx11-xcb-dev libxcb1-dev libxcb-util0-dev \
             libxcb-cursor-dev libxcb-keysyms1-dev libxcb-icccm4-dev \
             libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shape0-dev \
@@ -40,7 +40,7 @@ jobs:
 
       - name: Build
         run: |
-          meson setup build --prefix=/usr --buildtype=release -Dmans=true
+          meson setup build --prefix=/usr --buildtype=release
           ninja -C build
           meson test -C build i3ext_scan
           DESTDIR="$PWD/pkg" ninja -C build install

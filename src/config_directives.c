@@ -615,6 +615,23 @@ CFGFUN(color_single, const char *colorclass, const char *color) {
     config.client.background = draw_util_hex_to_color(color);
 }
 
+CFGFUN(switcher_background, const char *color) {
+    config.switcher.background = draw_util_hex_to_color(color);
+    config.switcher.set |= SWITCHER_COLOR_BACKGROUND;
+}
+
+CFGFUN(switcher_bar, const char *background, const char *text) {
+    config.switcher.bar_background = draw_util_hex_to_color(background);
+    config.switcher.bar_text = draw_util_hex_to_color(text);
+    config.switcher.set |= SWITCHER_COLOR_BAR_BACKGROUND | SWITCHER_COLOR_BAR_TEXT;
+}
+
+CFGFUN(switcher_tile, const char *background, const char *text) {
+    config.switcher.tile_background = draw_util_hex_to_color(background);
+    config.switcher.tile_text = draw_util_hex_to_color(text);
+    config.switcher.set |= SWITCHER_COLOR_TILE_BACKGROUND | SWITCHER_COLOR_TILE_TEXT;
+}
+
 CFGFUN(color, const char *colorclass, const char *border, const char *background, const char *text, const char *indicator, const char *child_border) {
 #define APPLY_COLORS(classname)                                                                              \
     do {                                                                                                     \

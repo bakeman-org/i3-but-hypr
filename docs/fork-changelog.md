@@ -451,6 +451,24 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 `gaps inner 4 / outer 8`、默认边框宽 1px。回到上游观感设 `rounding 0`
 并把 gaps 归零即可。
 
+### 4. Alt+Tab 切换器主题（`src/switcher.c`、`src/config_directives.c`、`src/i3ext.c`）
+
+早期实现把 `client.focused.border`（通常是高亮强调色）当作共享标题栏底色，
+再配 `client.focused.text` 浅色文字，对比度极低，标题几乎看不清。
+
+- **默认配色改为标题栏配对**：标题栏底色用 `client.focused.background`、
+  文字用 `client.focused.text`；无缩略图贴图用 `client.unfocused.background`
+  与 `client.unfocused.text`；面板底色用 `client.background`。
+- **新增三条原生指令**：`switcher_background <color>`、
+  `switcher_bar <background> <text>`、`switcher_tile <background> <text>`，
+  未配置的项逐项回退到上述 `client.*` 颜色。
+- **主题系统扩展**：`i3ext` 的 `themes.<name>` 新增 `switcher` 子表
+  （`background`、`bar`、`tile`），也支持顶层 `i3ext.switcher` 覆盖；
+  `etc/config` 的五套 palette（gruber_darker / md3 / onedark / dracula /
+  catppuccin_mocha）都补上了对应配色，切主题即切换切换器配色。
+- 缩略图选中/未选中边框仍走 `client.focused` / `client.unfocused` 的边框或
+  渐变，保持与窗口装饰一致。
+
 ## 五、上游 TODO 处理状态
 
 对仓库内全部上游遗留 TODO（`grep -irn 'TODO'`）逐条评估，结果分三类。

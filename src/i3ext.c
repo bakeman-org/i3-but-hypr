@@ -552,7 +552,7 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
 
 static const char *const i3ext_top_keys[] = {
     "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
-    "titlebar", "client", "animations", "dropdown", "layouts"};
+    "titlebar", "client", "switcher", "animations", "dropdown", "layouts"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -565,7 +565,8 @@ static const char *const i3ext_opacity_keys[] = {"active", "inactive", "dim_inac
 static const char *const i3ext_titlebar_keys[] = {"align", "height", "padding", "font", "visibility"};
 static const char *const i3ext_client_keys[] = {"background", "colors", "gradients"};
 static const char *const i3ext_client_states[] = {"focused", "focused_inactive", "unfocused", "urgent"};
-static const char *const i3ext_theme_keys[] = {"client", "bar"};
+static const char *const i3ext_switcher_keys[] = {"background", "bar", "tile"};
+static const char *const i3ext_theme_keys[] = {"client", "bar", "switcher"};
 static const char *const i3ext_bar_single_keys[] = {
     "background", "statusline", "separator",
     "focused_background", "focused_statusline", "focused_separator"};
@@ -840,6 +841,28 @@ static void i3ext_validate_bar(lua_State *L, int idx, const char *path) {
     }
 }
 
+static void i3ext_validate_switcher(lua_State *L, int idx, const char *path) {
+    idx = lua_absindex(L, idx);
+    if (!lua_istable(L, idx)) {
+        luaL_error(L, "%s: expected table", path);
+    }
+    i3ext_check_keys(L, idx, path, i3ext_switcher_keys, I3EXT_ARRAY_LEN(i3ext_switcher_keys));
+
+    char sub[384];
+    snprintf(sub, sizeof(sub), "%s.background", path);
+    i3ext_get_hex(L, idx, "background", sub);
+    snprintf(sub, sizeof(sub), "%s.bar", path);
+    if (i3ext_get_table(L, idx, "bar", sub)) {
+        i3ext_validate_color_list(L, -1, sub, 2);
+        lua_pop(L, 1);
+    }
+    snprintf(sub, sizeof(sub), "%s.tile", path);
+    if (i3ext_get_table(L, idx, "tile", sub)) {
+        i3ext_validate_color_list(L, -1, sub, 2);
+        lua_pop(L, 1);
+    }
+}
+
 static void i3ext_validate_client(lua_State *L, int idx, const char *path) {
     idx = lua_absindex(L, idx);
     if (!lua_istable(L, idx)) {
@@ -918,6 +941,11 @@ static void i3ext_validate_themes(lua_State *L, int idx, const char *path) {
         snprintf(sub, sizeof(sub), "%s.bar", theme_path);
         if (i3ext_get_table(L, theme, "bar", sub)) {
             i3ext_validate_bar(L, -1, sub);
+            lua_pop(L, 1);
+        }
+        snprintf(sub, sizeof(sub), "%s.switcher", theme_path);
+        if (i3ext_get_table(L, theme, "switcher", sub)) {
+            i3ext_validate_switcher(L, -1, sub);
             lua_pop(L, 1);
         }
         lua_pop(L, 1);
@@ -1091,6 +1119,11 @@ static void i3ext_validate(lua_State *L, int table) {
 
     if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
         i3ext_validate_bar(L, -1, "i3ext.bar");
+        lua_pop(L, 1);
+    }
+
+    if (i3ext_get_table(L, table, "switcher", "i3ext.switcher")) {
+        i3ext_validate_switcher(L, -1, "i3ext.switcher");
         lua_pop(L, 1);
     }
 
@@ -1459,6 +1492,45 @@ static void i3ext_apply_bar(lua_State *L, int idx, const char *path,
     }
 }
 
+/* Applies a switcher theme table: { background, bar = { bg, text }, tile = { bg, text } }. */
+static void i3ext_apply_switcher(lua_State *L, int idx, const char *path,
+                                 struct ConfigResultIR *result) {
+    idx = lua_absindex(L, idx);
+    char sub[384];
+
+    const char *background;
+    snprintf(sub, sizeof(sub), "%s.background", path);
+    if (i3ext_get_string(L, idx, "background", sub, &background)) {
+        cfg_switcher_background(NULL, result, background);
+    }
+
+    snprintf(sub, sizeof(sub), "%s.bar", path);
+    if (i3ext_get_table(L, idx, "bar", sub)) {
+        char bg[32], text[32];
+        lua_geti(L, -1, 1);
+        snprintf(bg, sizeof(bg), "%s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        lua_geti(L, -1, 2);
+        snprintf(text, sizeof(text), "%s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        lua_pop(L, 1);
+        cfg_switcher_bar(NULL, result, bg, text);
+    }
+
+    snprintf(sub, sizeof(sub), "%s.tile", path);
+    if (i3ext_get_table(L, idx, "tile", sub)) {
+        char bg[32], text[32];
+        lua_geti(L, -1, 1);
+        snprintf(bg, sizeof(bg), "%s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        lua_geti(L, -1, 2);
+        snprintf(text, sizeof(text), "%s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        lua_pop(L, 1);
+        cfg_switcher_tile(NULL, result, bg, text);
+    }
+}
+
 static bool i3ext_push_selected_theme(lua_State *L, int table) {
     table = lua_absindex(L, table);
     lua_getfield(L, table, "themes");
@@ -1535,7 +1607,7 @@ static void i3ext_apply(lua_State *L, int table) {
         lua_pop(L, 1);
     }
 
-    /* 0.5 selected theme: client first, then bar. */
+    /* 0.5 selected theme: client first, then bar and switcher. */
     if (i3ext_push_selected_theme(L, table)) {
         const int theme = lua_absindex(L, -1);
         if (i3ext_get_table(L, theme, "client", "i3ext.theme.client")) {
@@ -1544,6 +1616,10 @@ static void i3ext_apply(lua_State *L, int table) {
         }
         if (i3ext_get_table(L, theme, "bar", "i3ext.theme.bar")) {
             i3ext_apply_bar(L, -1, "i3ext.theme.bar", &result);
+            lua_pop(L, 1);
+        }
+        if (i3ext_get_table(L, theme, "switcher", "i3ext.theme.switcher")) {
+            i3ext_apply_switcher(L, -1, "i3ext.theme.switcher", &result);
             lua_pop(L, 1);
         }
         lua_pop(L, 1);
@@ -1648,6 +1724,12 @@ static void i3ext_apply(lua_State *L, int table) {
     /* 5.5 top-level bar (overrides the theme) */
     if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
         i3ext_apply_bar(L, -1, "i3ext.bar", &result);
+        lua_pop(L, 1);
+    }
+
+    /* 5.6 top-level switcher (overrides the theme) */
+    if (i3ext_get_table(L, table, "switcher", "i3ext.switcher")) {
+        i3ext_apply_switcher(L, -1, "i3ext.switcher", &result);
         lua_pop(L, 1);
     }
 

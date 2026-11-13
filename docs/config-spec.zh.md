@@ -100,6 +100,9 @@ hot_reload on|off        # 默认 on
 | `scroller_ignore_proportion_single yes\|no` | 布局 | 单窗口时忽略列宽比例 |
 | `scroller_default_proportion_single <0.1-1.0>` | 布局 | 单窗口比例 |
 | `scroller_autofit yes\|no` | 布局 | 列宽自适应铺满 |
+| `switcher_background <color>` | 主题 | Alt+Tab 切换器面板底色 |
+| `switcher_bar <bg> <text>` | 主题 | 切换器底部标题栏底色 / 文字色 |
+| `switcher_tile <bg> <text>` | 主题 | 无缩略图窗口的贴图底色 / 文字色 |
 | `hot_reload on\|off` | 系统 | 配置热重载（默认 on） |
 | `i3ext { ... }` | 综合 | Lua 配置块（第十二节） |
 
@@ -278,7 +281,26 @@ client.urgent_gradient           "<起始色> <结束色> [角度]"
 - 只定义了某几个状态时，其余状态仍使用纯色，可混用。
 - 解析失败（颜色不是 `#` 开头、字段不足）打印错误并忽略该行。
 
-### 3.13 不透明度与暗化 `[扩展]`
+### 3.13 Alt+Tab 切换器配色 `[扩展]`
+
+```text
+switcher_background <color>
+switcher_bar        <background> <text>
+switcher_tile       <background> <text>
+```
+
+- `switcher_background`：切换器面板底色，默认取 `client.background`。
+- `switcher_bar`：底部共享标题栏的底色与文字色，默认取 `client.focused` 的
+  `background` / `text`（**不是** `border`：边框通常是高亮强调色，用作文字底色时
+  对比度很低，标题几乎看不清）。
+- `switcher_tile`：没有缩略图的窗口贴图底色与文字色，默认取 `client.unfocused` 的
+  `background` / `text`。
+- 三项互相独立，未配置的项逐项回退到对应 `client.*` 颜色；切换调色板时切换器自动跟随。
+- 缩略图的选中 / 未选中边框仍使用 `client.focused` / `client.unfocused` 的边框或渐变
+  （见 3.12），因此切换器整体与窗口边框风格一致。
+- 也可写在 `i3ext.themes.<name>.switcher` 里，见 12.3；原生指令与 Lua 块按出现顺序覆盖。
+
+### 3.14 不透明度与暗化 `[扩展]`
 
 ```text
 active_opacity   <0.0-1.0>     # 默认 1.0
@@ -896,10 +918,10 @@ i3ext {
   移除 `os`、`io`、`package`、`debug`、`require`、`load*`、`dofile`、`print` 等。
 - `i3 -C` 会执行并校验块内 Lua；未知字段、类型错误、范围错误都会导致校验失败。
 
-### 12.2 顶层键（共 12 个）
+### 12.2 顶层键（共 13 个）
 
 `binds`、`theme`、`themes`、`bar`、`gaps`、`decoration`、`opacity`、
-`titlebar`、`client`、`animations`、`dropdown`、`layouts`。
+`titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`。
 
 未列出的顶层键会报 `unknown field` 并使校验失败。
 
@@ -912,6 +934,7 @@ i3ext {
 | `theme` | 主题名字符串 | — | —（仅 i3ext 主题） |
 | `themes.<name>.client` | 形状同顶层 `client` | — | 见 `client` |
 | `themes.<name>.bar` | 形状同顶层 `bar` | — | 见 `bar` |
+| `themes.<name>.switcher` | 形状同顶层 `switcher` | — | 见 `switcher` |
 | `bar` | 11 个键（6 单色 + 5 三元组） | 颜色字符串 | bar `colors` |
 | `gaps` | 8 个键：`inner`/`outer`/`horizontal`/`vertical`/`top`/`right`/`bottom`/`left` | 0–1000 整数 | `gaps` / `gaps_in` / `gaps_out` |
 | `decoration.rounding` | 整数 | 0–100 | `rounding` |
@@ -929,6 +952,9 @@ i3ext {
 | `client.colors.<state>` | 5 色数组 | — | `client.<state>` |
 | `client.gradients.<state>` | `{起始色, 结束色[, 角度]}` | 角度整数 | `client.<state>_gradient` |
 | `client.colors.*` / `client.gradients.*` 的 state | `focused` / `focused_inactive` / `unfocused` / `urgent`（**4** 项） | — | 同上 |
+| `switcher.background` | 颜色 | — | `switcher_background` |
+| `switcher.bar` | 2 色数组 `{底色, 文字色}` | — | `switcher_bar` |
+| `switcher.tile` | 2 色数组 `{底色, 文字色}` | — | `switcher_tile` |
 | `animations.enabled` | 布尔 | — | `animations` |
 | `animations.beziers.<name>` | 4 个数字的数组 | — | `bezier` |
 | `animations.windows` / `open` / `close` / `workspaces` / `dropdown` | 表：`duration` / `curve` / `enabled` | — | `animation` |
@@ -951,10 +977,11 @@ i3ext {
 
 固定为：
 
-`binds` → 主题 `client` → 主题 `bar` → `gaps` → `decoration` → `opacity` →
-`titlebar` → 顶层 `client` → 顶层 `bar` → `animations` → `dropdown` → `layouts`。
+`binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` → `gaps` → `decoration` →
+`opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` → 顶层 `switcher` →
+`animations` → `dropdown` → `layouts`。
 
-因此顶层 `client` / `bar` 覆盖主题；`layouts` 最后应用。
+因此顶层 `client` / `bar` / `switcher` 覆盖主题；`layouts` 最后应用。
 
 ### 12.5 与原生指令的关系
 
@@ -994,7 +1021,7 @@ i3ext {
 | 内置贝塞尔曲线 | 8 | `default` `linear` `easeOutCubic` `easeOutQuint` `easeOutExpo` `easeInOutCubic` `easeInOutQuint` `easeInOutSine` |
 | `dropdown_position` | 2 | `top` `bottom` |
 | master 方位（仅 i3ext） | 4 | `left` `right` `top` `bottom` |
-| i3ext 顶层键 | 12 | `binds` `theme` `themes` `bar` `gaps` `decoration` `opacity` `titlebar` `client` `animations` `dropdown` `layouts` |
+| i3ext 顶层键 | 13 | `binds` `theme` `themes` `bar` `gaps` `decoration` `opacity` `titlebar` `client` `switcher` `animations` `dropdown` `layouts` |
 
 ---
 

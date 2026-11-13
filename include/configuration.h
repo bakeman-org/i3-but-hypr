@@ -111,6 +111,15 @@ struct Mode {
     SLIST_ENTRY(Mode) modes;
 };
 
+/* Bits for config.switcher.set: which Alt+Tab switcher colors were configured
+ * explicitly. Unset colors fall back to the corresponding client colors, so the
+ * switcher always follows the active palette (see src/switcher.c). */
+#define SWITCHER_COLOR_BACKGROUND (1U << 0)
+#define SWITCHER_COLOR_BAR_BACKGROUND (1U << 1)
+#define SWITCHER_COLOR_BAR_TEXT (1U << 2)
+#define SWITCHER_COLOR_TILE_BACKGROUND (1U << 3)
+#define SWITCHER_COLOR_TILE_TEXT (1U << 4)
+
 /**
  * Holds part of the configuration (the part which is not already in dedicated
  * structures in include/data.h).
@@ -295,6 +304,15 @@ struct Config {
         struct Colortriple unfocused;
         struct Colortriple urgent;
     } bar;
+    /* [fork] Alt+Tab switcher theme; see the SWITCHER_COLOR_* bits above. */
+    struct config_switcher {
+        uint32_t set;
+        color_t background;
+        color_t bar_background;
+        color_t bar_text;
+        color_t tile_background;
+        color_t tile_text;
+    } switcher;
 
     /** What should happen when a new popup is opened during fullscreen mode */
     enum {

@@ -85,6 +85,9 @@ state INITIAL:
   'scroller_ignore_proportion_single'      -> SCROLLER_IGNORE_PROPORTION_SINGLE
   'scroller_default_proportion_single'     -> SCROLLER_DEFAULT_PROPORTION_SINGLE
   'scroller_autofit'                       -> SCROLLER_AUTOFIT
+  'switcher_background'                    -> SWITCHER_BACKGROUND
+  'switcher_bar'                           -> SWITCHER_BAR
+  'switcher_tile'                          -> SWITCHER_TILE
   'ipc_socket', 'ipc-socket'               -> IPC_SOCKET
   'ipc_kill_timeout'                       -> IPC_KILL_TIMEOUT
   'restart_state'                          -> RESTART_STATE
@@ -459,6 +462,29 @@ state COLOR_CHILD_BORDER:
       -> call cfg_color($colorclass, $border, $background, $text, $indicator, $child_border)
   end
       -> call cfg_color($colorclass, $border, $background, $text, $indicator, NULL)
+
+# [fork] switcher_background <hexcolor>: panel background of the Alt+Tab switcher
+state SWITCHER_BACKGROUND:
+  color = word
+      -> call cfg_switcher_background($color)
+
+# [fork] switcher_bar <background> <text>: shared title bar of the switcher
+state SWITCHER_BAR:
+  background = word
+      -> SWITCHER_BAR_TEXT
+
+state SWITCHER_BAR_TEXT:
+  text = word
+      -> call cfg_switcher_bar($background, $text)
+
+# [fork] switcher_tile <background> <text>: fallback tiles without a preview
+state SWITCHER_TILE:
+  background = word
+      -> SWITCHER_TILE_TEXT
+
+state SWITCHER_TILE_TEXT:
+  text = word
+      -> call cfg_switcher_tile($background, $text)
 
 # <exec|exec_always> [--no-startup-id] command
 state EXEC:

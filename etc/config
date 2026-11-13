@@ -212,8 +212,15 @@ bar {
 i3ext {
     -- 配色主题：切换整套 palette 只需修改下面这一行
     --theme = "gruber_darker",
-    theme = "onedark",
-    -- 预定义主题：name -> { client = ..., bar = ... }
+    --theme = "onedark",
+    theme = "catppuccin_mocha",
+    -- 预定义主题：name -> { client = ..., bar = ..., switcher = ... }
+    --   client   : 窗口边框 / 标题栏配色
+    --   bar      : i3bar 配色
+    --   switcher : Alt+Tab 切换器配色
+    --              { background = 面板底色,
+    --                bar  = { 标题栏底色, 标题文字色 },
+    --                tile = { 缩略图缺失时的贴图底色, 贴图文字色 } }
     themes = {
         gruber_darker = {
             client = {
@@ -240,6 +247,11 @@ i3ext {
                 inactive_workspace = { "#181818", "#181818", "#95a99f" },
                 urgent_workspace = { "#f43841", "#f43841", "#181818" },
                 binding_mode = { "#ffdd33", "#ffdd33", "#181818" },
+            },
+            switcher = {
+                background = "#181818",
+                bar = { "#282828", "#e4e4e4" },
+                tile = { "#181818", "#e4e4e4" },
             },
         },
         md3 = {
@@ -268,6 +280,11 @@ i3ext {
                 urgent_workspace = { "#f2b8b5", "#f2b8b5", "#141218" },
                 binding_mode = { "#efb8c8", "#efb8c8", "#141218" },
             },
+            switcher = {
+                background = "#141218",
+                bar = { "#211f26", "#e6e0e9" },
+                tile = { "#1d1b20", "#e6e0e9" },
+            },
         },
         onedark = {
             client = {
@@ -294,6 +311,11 @@ i3ext {
                 inactive_workspace = { "#1e2227", "#1e2227", "#5c6370" },
                 urgent_workspace = { "#e06c75", "#e06c75", "#21252b" },
                 binding_mode = { "#c678dd", "#c678dd", "#21252b" },
+            },
+            switcher = {
+                background = "#1e2227",
+                bar = { "#21252b", "#abb2bf" },
+                tile = { "#1e2227", "#abb2bf" },
             },
         },
         dracula = {
@@ -322,6 +344,11 @@ i3ext {
                 urgent_workspace = { "#ff5555", "#ff5555", "#21222c" },
                 binding_mode = { "#ff79c6", "#ff79c6", "#21222c" },
             },
+            switcher = {
+                background = "#191a21",
+                bar = { "#282a36", "#f8f8f2" },
+                tile = { "#191a21", "#f8f8f2" },
+            },
         },
         catppuccin_mocha = {
             client = {
@@ -348,6 +375,11 @@ i3ext {
                 inactive_workspace = { "#11111b", "#11111b", "#6c7086" },
                 urgent_workspace = { "#f38ba8", "#f38ba8", "#11111b" },
                 binding_mode = { "#f9e2af", "#f9e2af", "#11111b" },
+            },
+            switcher = {
+                background = "#11111b",
+                bar = { "#1e1e2e", "#cdd6f4" },
+                tile = { "#181825", "#cdd6f4" },
             },
         },
     },
