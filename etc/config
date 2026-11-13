@@ -183,8 +183,8 @@ mode "resize" {
 bindsym $mod+Shift+r reload
 # restart 仅在更换 i3 二进制等场景需要，按需取消注释：
 # bindsym $mod+Shift+r restart
-# $mod+Shift+e：执行退出菜单（自定义脚本 dmenudock）
-bindsym $mod+Shift+e exec ~/.local/bin/qrdock
+# $mod+Shift+e：退出 i3（原生 xcb/cairo 确认对话框，不用 Qt/Python）
+bindsym $mod+Shift+e exec --no-startup-id i3-exit-dialog
 
 # ---------- 状态栏（i3bar）配置 ----------
 bar {

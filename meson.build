@@ -504,6 +504,24 @@ install_data(
   install_mode: 'rwxr-xr-x',
 )
 
+# Native GTK/Qt-free confirmation dialog used by $mod+Shift+e.
+executable(
+  'i3-exit-dialog',
+  'i3-exit-dialog.c',
+  install: true,
+  include_directories: inc,
+  dependencies: [
+    m_dep,
+    xcb_dep,
+    xcb_shape_dep,
+    xcb_util_dep,
+    xcb_util_keysyms_dep,
+    cairo_dep,
+    pangocairo_dep,
+    glib_dep,
+  ],
+)
+
 install_subdir(
   'etc',
   strip_directory: true,
