@@ -344,6 +344,14 @@ i3bar 在每次状态更新（默认 1 秒一次）和每次工作区事件时�
 - **动画 tick 单次遍历**（`src/animation.c`）：`animation_tick_cb()` 原本在遍历
   `all_cons` 处理完所有动画后，再调用一次 `animation_running()` 又整树遍历一遍。
   现在在 tick 循环内用 `still_running` 记录是否仍有活跃动画，省掉每帧一次全树扫描。
+- **scroller 焦点列检测修复**（`src/render.c`）：`precalculate_layout_rects()` 原来用
+  `cur == focused || con_inside_focused(cur)` 判断焦点在第几列，但
+  `con_inside_focused(cur)` 问的是“cur 是否在 focused 内部”（即 focused 是 cur 的
+  祖先），方向正好相反。`layout scroller` 会把工作区原有的顶层容器整体包裹进
+  scroller 容器，列本身常常是容器而不是窗口；此时该条件永远不成立，`focus_index`
+  退回 0，视图始终钉在第一列，切换焦点看起来毫无反应（`--nest` 里尤其明显）。
+  改为 `con_has_parent(focused, cur)`（focused 是否位于该列内部），焦点列才会被
+  正确滚动/居中。
 
 ### 10. 帧提交、动画时序与状态栏（本轮）
 

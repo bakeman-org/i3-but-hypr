@@ -594,7 +594,13 @@ static Rect *precalculate_layout_rects(Con *con, render_params *p, Rect *stack, 
         int focus_index = -1;
         Con *cur;
         TAILQ_FOREACH (cur, &(con->nodes_head), nodes) {
-            if (cur == focused || con_inside_focused(cur)) {
+            /* A column can be a container itself: `layout scroller` wraps the
+             * top-level containers of a workspace, so the focused window may
+             * live several levels below the column. con_inside_focused() would
+             * test the opposite relation (cur inside focused) and never match
+             * in that case, which pinned the scroller to the first column and
+             * made focus changes appear to do nothing. */
+            if (focused != NULL && (cur == focused || con_has_parent(focused, cur))) {
                 focus_index = count;
             }
             count++;

@@ -37,3 +37,6 @@ LAST_VERSION
 /build
 core.*
 *.deb
+control.tar.gz
+data.tar.gz
+debian-binary

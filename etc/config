@@ -459,7 +459,11 @@ i3ext {
         scroller = {
             proportion = 0.9,
             structs = 20,
-            focus_center = false,
+            -- 焦点列始终滚动到屏幕中央（niri 风格）；改为 false 后首尾列会贴边
+            focus_center = true,
+            -- 以下两项只在 focus_center = false 时生效：
+            --   prefer_overspread : 首尾列贴边
+            --   prefer_center     : 非首尾列也居中（否则中间列也按左右半区贴边）
             prefer_center = false,
             prefer_overspread = true,
             ignore_proportion_single = true,
