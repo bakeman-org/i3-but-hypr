@@ -51,25 +51,36 @@
 - 枚举值大小写：多数枚举用 `strcasecmp`（大小写不敏感），少数（如 `gaps` 的 scope、
   `layout_from_name` 的 `default`）区分大小写，下文逐条注明。
 
-### 1.3 热重载与配置校验 `[扩展]`
+### 1.3 热重载与状态行 `[扩展]`
 
 ```text
 hot_reload on|off        # 默认 on
 status_line on|off       # 默认 on
 ```
 
-- 开启后监听主配置文件与全部 `include` 文件所在目录，保存即自动重载（200 ms 防抖）。
+推荐写法是放进 `i3ext { ... }` 块（Lua 布尔值），这样所有 fork 扩展集中在一处：
+
+```lua
+i3ext {
+    hot_reload = true,
+    status_line = true,
+}
+```
+
+- 开启热重载后监听主配置文件与全部 `include` 文件所在目录，保存即自动重载（200 ms 防抖）。
 - 重载前会在子进程里用 `i3 -C` 校验新配置；校验失败则**保留旧配置**并用 `i3-nagbar` 弹出错误。
 - 关闭后只能手动触发重载（`i3-msg reload`）或重启（`i3-msg restart`）。
 - 编辑器中“写临时文件再 rename”的原子保存方式也能被捕获。
-- `status_line`：在焦点输出顶部显示一条常驻状态行（类似 Emacs mode line），
-  实时反映 WM 当前状态与最近一次动作，便于调试：
-  `[default] ws:1 layout:scroller st tiled last:focus right`。
-  字段依次为 binding mode（`indicator` 色）、工作区、焦点窗口所在容器的布局
+- `status_line`：把 WM 当前状态与最近一次动作发布到 **i3bar 的 binding-mode 区块**，
+  不创建任何屏幕 overlay，因此不会遮挡窗口内容。显示格式：
+  `[default] ws:1 | scroller | st tiled | last: focus right`。
+  字段依次为 binding mode、工作区、焦点窗口所在容器的布局
   （splith/splitv/tabbed/stacked/scroller/dwindle/master）、焦点窗口标题、
-  `tiled/floating/fullscreen`、最后执行的命令。每个渲染周期结束后刷新，
-  文字变化时才重绘；窗口为 override-redirect，不抢焦点，Shape 扩展可用时
-  设置空输入区域以允许鼠标穿透。
+  `tiled/floating/fullscreen`、最后执行的命令。文字变化时才发布；
+  i3bar 未运行时该功能无副作用。
+
+> 这两个指令仍然是合法的原生语法，但 fork 扩展一律推荐写在 `i3ext {}` 中；
+> `i3ext` 与原生指令不要混用。
 
 ---
 
@@ -112,8 +123,8 @@ status_line on|off       # 默认 on
 | `switcher_background <color>` | 主题 | Alt+Tab 切换器面板底色 |
 | `switcher_bar <bg> <text>` | 主题 | 切换器底部标题栏底色 / 文字色 |
 | `switcher_tile <bg> <text>` | 主题 | 无缩略图窗口的贴图底色 / 文字色 |
-| `hot_reload on\|off` | 系统 | 配置热重载（默认 on） |
-| `status_line on\|off` | 系统 | 顶部常驻状态行（默认 on） |
+| `hot_reload on\|off` | 系统 | 配置热重载（默认 on；推荐写进 `i3ext`） |
+| `status_line on\|off` | 系统 | i3bar 状态行（默认 on；推荐写进 `i3ext`） |
 | `i3ext { ... }` | 综合 | Lua 配置块（第十二节） |
 
 ### 2.2 新增取值 `[扩展]`
@@ -928,10 +939,11 @@ i3ext {
   移除 `os`、`io`、`package`、`debug`、`require`、`load*`、`dofile`、`print` 等。
 - `i3 -C` 会执行并校验块内 Lua；未知字段、类型错误、范围错误都会导致校验失败。
 
-### 12.2 顶层键（共 13 个）
+### 12.2 顶层键（共 15 个）
 
 `binds`、`theme`、`themes`、`bar`、`gaps`、`decoration`、`opacity`、
-`titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`。
+`titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`、
+`hot_reload`、`status_line`。
 
 未列出的顶层键会报 `unknown field` 并使校验失败。
 
@@ -939,6 +951,8 @@ i3ext {
 
 | 路径 | 类型 / 枚举 | 范围 | 对应原生指令 |
 |------|------------|------|-------------|
+| `hot_reload` | 布尔 | — | `hot_reload` |
+| `status_line` | 布尔 | — | `status_line` |
 | `binds[]` | 表数组，键 `key`/`command`/`release`/`type` | — | `bindsym` |
 | `binds[].type` | `bindsym` / `bindcode`（**2** 项） | — | `bindsym` / `bindcode` |
 | `theme` | 主题名字符串 | — | —（仅 i3ext 主题） |
@@ -987,9 +1001,9 @@ i3ext {
 
 固定为：
 
-`binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` → `gaps` → `decoration` →
-`opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` → 顶层 `switcher` →
-`animations` → `dropdown` → `layouts`。
+`hot_reload` / `status_line` → `binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` →
+`gaps` → `decoration` → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` →
+顶层 `switcher` → `animations` → `dropdown` → `layouts`。
 
 因此顶层 `client` / `bar` / `switcher` 覆盖主题；`layouts` 最后应用。
 

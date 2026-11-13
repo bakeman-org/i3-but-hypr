@@ -533,7 +533,7 @@ pseudo            # dwindle 伪平铺切换
 centerwindow      # 将当前窗口居中
 cyclenext         # 循环聚焦下一个窗口
 cycleprev         # 循环聚焦上一个窗口
-snap left|right|up|down                            # 浮动窗口贴边；平铺时等价 focus
+snap left|right|up|down                            # 浮动窗口贴边（仅浮动窗口生效）
 snap top-left|top-right|bottom-left|bottom-right   # 直接贴到四分屏
 switcher next|prev                                 # Alt+Tab 缩略图切换器（打开/循环）
 switcher commit|close                              # 确认 / 取消
@@ -546,8 +546,8 @@ dropdown toggle|show|hide [<spec>]                 # 下拉窗口（支持 crite
 | --- | --- | --- | --- |
 | 居中浮动窗口 | 左半屏 | 左上四分屏 | 上半屏（全宽） |
 
-焦点在平铺窗口时，`snap left|right|up|down` 等同于 `focus left|right|up|down`，
-所以可以把方向键直接换成 `snap`，浮动/平铺两种状态都顺手。
+焦点在平铺窗口时 `snap` 不做任何事——平铺布局由树管理，方向键应继续绑定上游的
+`focus left|right|up|down`。这样 fork 扩展不会悄悄改变原生 i3 的焦点语义。
 
 `switcher` 的交互（mangowc 语义）：
 
@@ -593,11 +593,16 @@ i3ext {
         { key = "Mod4+equal", command = "layoutmsg proportion +0.05" },
         { key = "Mod4+minus", command = "layoutmsg proportion -0.05" },
         { key = "Mod4+c", command = "centerwindow" },
-        -- 浮动窗口贴边（平铺时自动退化为 focus 移动）
-        { key = "Mod4+Left", command = "snap left" },
-        { key = "Mod4+Right", command = "snap right" },
-        { key = "Mod4+Up", command = "snap up" },
-        { key = "Mod4+Down", command = "snap down" },
+        -- 方向键保持上游 i3 语义：移动焦点
+        { key = "Mod4+Left", command = "focus left" },
+        { key = "Mod4+Right", command = "focus right" },
+        { key = "Mod4+Up", command = "focus up" },
+        { key = "Mod4+Down", command = "focus down" },
+        -- 浮动窗口贴边（snap 只对浮动窗口生效）
+        { key = "Mod4+Mod1+Left", command = "snap left" },
+        { key = "Mod4+Mod1+Right", command = "snap right" },
+        { key = "Mod4+Mod1+Up", command = "snap up" },
+        { key = "Mod4+Mod1+Down", command = "snap down" },
         -- 可选：直接贴四角
         { key = "Mod4+Ctrl+Left", command = "snap top-left" },
         { key = "Mod4+Ctrl+Right", command = "snap bottom-right" },

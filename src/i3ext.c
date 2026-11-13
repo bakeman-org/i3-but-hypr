@@ -552,7 +552,8 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
 
 static const char *const i3ext_top_keys[] = {
     "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
-    "titlebar", "client", "switcher", "animations", "dropdown", "layouts"};
+    "titlebar", "client", "switcher", "animations", "dropdown", "layouts",
+    "status_line", "hot_reload"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -1564,6 +1565,15 @@ static void i3ext_apply(lua_State *L, int table) {
     struct ConfigResultIR result = {0};
     table = lua_absindex(L, table);
     char value[64];
+
+    /* Fork-wide switches live inside i3ext, not as native i3 directives. */
+    bool enabled;
+    if (i3ext_get_bool(L, table, "hot_reload", "i3ext.hot_reload", &enabled)) {
+        cfg_hot_reload(NULL, &result, enabled ? "yes" : "no");
+    }
+    if (i3ext_get_bool(L, table, "status_line", "i3ext.status_line", &enabled)) {
+        cfg_status_line(NULL, &result, enabled ? "yes" : "no");
+    }
 
     /* 0. fork extension keybindings */
     if (i3ext_get_table(L, table, "binds", "i3ext.binds")) {

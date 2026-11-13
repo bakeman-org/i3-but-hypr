@@ -4,32 +4,16 @@
  * i3 - an improved tiling window manager
  * © 2009 Michael Stapelberg and contributors (see also: LICENSE)
  *
- * status_line.c: an always-visible state line, similar to the Emacs mode line.
+ * status_line.c: publishes a compact WM state string for i3bar.
  *
- * It shows what the window manager is currently doing: the active binding mode,
- * the workspace and layout of the focused window, whether it is tiled, floating
- * or fullscreen, and the last executed action. The line is an override-redirect
- * window (no focus, click-through when the Shape extension is available) at the
- * top of the focused output.
+ * The text is sent as a "mode" IPC event, which i3bar renders in its existing
+ * binding-mode block. That keeps the state visible in the bar instead of
+ * covering window contents with an overlay window.
  *
  */
 #include "all.h"
 
-#include <cairo/cairo.h>
-#include <xcb/shape.h>
-
-#define SL_PAD logical_px(4)
-#define SL_GAP logical_px(12)
-
-static xcb_window_t line_window = XCB_NONE;
-static surface_t line_surface;
-static bool line_visible = false;
-static int line_x = 0;
-static int line_y = 0;
-static int line_w = 0;
-static int line_h = 0;
-
-/* Cached text, so that the line is only redrawn when something changed. */
+/* Cached text, so that we only publish when something changed. */
 static char line_text[1024] = "";
 static char last_command[512] = "";
 
@@ -41,7 +25,7 @@ void status_line_set_last_command(const char *command) {
         return;
     }
 
-    /* Collapse newlines/tabs so that the line stays a single line. */
+    /* Collapse newlines/tabs so that the text stays a single line. */
     size_t out = 0;
     for (size_t i = 0; command[i] != '\0' && out + 1 < sizeof(last_command); i++) {
         const unsigned char c = (unsigned char)command[i];
@@ -51,23 +35,42 @@ void status_line_set_last_command(const char *command) {
     utf8_truncate_tail(last_command);
 }
 
-void status_line_hide(void) {
-    if (!line_visible || line_window == XCB_NONE) {
+static void publish(const char *change) {
+    if (conn == NULL) {
         return;
     }
 
-    draw_util_surface_free(conn, &line_surface);
-    xcb_destroy_window(conn, line_window);
-    line_window = XCB_NONE;
-    line_visible = false;
+    /* Escape for the JSON payload of the IPC event. */
+    char escaped[2048];
+    size_t out = 0;
+    for (size_t i = 0; change[i] != '\0' && out + 2 < sizeof(escaped); i++) {
+        const unsigned char c = (unsigned char)change[i];
+        if (c == '"' || c == '\\') {
+            escaped[out++] = '\\';
+            escaped[out++] = (char)c;
+        } else if (c < 0x20) {
+            escaped[out++] = ' ';
+        } else {
+            escaped[out++] = (char)c;
+        }
+    }
+    escaped[out] = '\0';
+
+    char *msg;
+    sasprintf(&msg, "{\"change\":\"%s\", \"pango_markup\":false}", escaped);
+    ipc_send_event("mode", I3_IPC_EVENT_MODE, msg);
+    free(msg);
+}
+
+void status_line_hide(void) {
     line_text[0] = '\0';
-    xcb_flush(conn);
+    /* Restore the plain binding mode in the bar. */
+    publish(current_binding_mode != NULL ? current_binding_mode : DEFAULT_BINDING_MODE);
 }
 
 static const char *layout_name(layout_t layout) {
     switch (layout) {
         case L_DEFAULT:
-            return "splith";
         case L_SPLITH:
             return "splith";
         case L_SPLITV:
@@ -164,102 +167,37 @@ static void build_text(char *buf, size_t len) {
     snprintf(short_title, sizeof(short_title), "%s", title);
     utf8_truncate_tail(short_title);
 
-    snprintf(buf, len, "ws:%s  layout:%s  %s%s  last:%s",
+    char short_last[64];
+    size_t last_len = strlen(last_command);
+    if (last_len > sizeof(short_last) - 1) {
+        last_len = sizeof(short_last) - 1;
+    }
+    memcpy(short_last, last_command, last_len);
+    short_last[last_len] = '\0';
+    utf8_truncate_tail(short_last);
+
+    snprintf(buf, len, "[%s] %s | %s | %s%s | last: %s",
+             current_binding_mode != NULL ? current_binding_mode : "default",
              ws_name, layout, short_title, state,
-             last_command[0] != '\0' ? last_command : "-");
+             short_last[0] != '\0' ? short_last : "-");
 }
 
 void status_line_update(void) {
-    if (!config.status_line || conn == NULL || root_screen == NULL || config.font.height == 0) {
+    if (!config.status_line || conn == NULL || root_screen == NULL) {
         return;
     }
 
     char text[sizeof(line_text)];
     build_text(text, sizeof(text));
-
-    Rect out = {0, 0, root_screen->width_in_pixels, root_screen->height_in_pixels};
-    Output *output = (focused != NULL ? get_output_for_con(focused) : NULL);
-    if (output != NULL) {
-        out = output->rect;
-    }
-
-    const int height = config.font.height + 2 * SL_PAD;
-    if (out.width <= 0) {
+    if (strcmp(text, line_text) == 0) {
         return;
     }
 
-    if (line_window == XCB_NONE || line_x != out.x || line_y != out.y ||
-        line_w != out.width || line_h != height) {
-        if (line_window != XCB_NONE) {
-            draw_util_surface_free(conn, &line_surface);
-            xcb_destroy_window(conn, line_window);
-            line_window = XCB_NONE;
-            line_visible = false;
-        }
+    snprintf(line_text, sizeof(line_text), "%s", text);
+    publish(text);
+}
 
-        line_x = out.x;
-        line_y = out.y;
-        line_w = out.width;
-        line_h = height;
-
-        const xcb_visualid_t visual = get_visualid_by_depth(root_depth);
-        const uint32_t values[] = {
-            root_screen->black_pixel,
-            root_screen->black_pixel,
-            1,
-            colormap,
-        };
-        const uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL |
-                              XCB_CW_OVERRIDE_REDIRECT | XCB_CW_COLORMAP;
-        const Rect dims = {line_x, line_y, line_w, line_h};
-        line_window = create_window(conn, dims, root_depth, visual, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-                                    XCURSOR_CURSOR_POINTER, false, mask, (uint32_t *)values);
-
-        /* Make the line click-through: an empty input shape means the X server
-         * delivers pointer events to the window below. */
-        if (shape_supported) {
-            xcb_shape_rectangles(conn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT, 0,
-                                 line_window, 0, 0, 0, NULL);
-        }
-
-        draw_util_surface_init(conn, &line_surface, line_window, get_visualtype_by_id(visual),
-                               line_w, line_h);
-        /* Mapping with a background pixel clears the window, so map first. */
-        xcb_map_window(conn, line_window);
-        line_visible = true;
-        line_text[0] = '\0';
-    }
-
-    if (strcmp(text, line_text) != 0) {
-        const color_t bg = config.client.focused.background;
-        const color_t fg = config.client.focused.text;
-        const color_t mode_fg = config.client.focused.indicator;
-
-        draw_util_rectangle(&line_surface, bg, 0, 0, line_w, line_h);
-
-        char mode_text[128];
-        snprintf(mode_text, sizeof(mode_text), "[%s]",
-                 current_binding_mode != NULL ? current_binding_mode : "default");
-        i3String *mode = i3string_from_utf8(mode_text);
-        const int mode_w = predict_text_width(mode);
-        const int text_y = (line_h - config.font.height) / 2;
-
-        draw_util_text(mode, &line_surface, mode_fg, bg, SL_PAD, text_y,
-                       line_w - 2 * SL_PAD);
-        i3string_free(mode);
-
-        i3String *rest = i3string_from_utf8(text);
-        draw_util_text(rest, &line_surface, fg, bg, SL_PAD + mode_w + SL_GAP, text_y,
-                       line_w - SL_PAD - mode_w - SL_GAP - SL_PAD);
-        i3string_free(rest);
-
-        CAIRO_SURFACE_FLUSH(line_surface.surface);
-        snprintf(line_text, sizeof(line_text), "%s", text);
-    }
-
-    /* Managed frames are raised by i3 during the render, so raise the line
-     * again at the end of each update. */
-    const uint32_t stack_mode = XCB_STACK_MODE_ABOVE;
-    xcb_configure_window(conn, line_window, XCB_CONFIG_WINDOW_STACK_MODE, &stack_mode);
-    xcb_flush(conn);
+void status_line_refresh(void) {
+    line_text[0] = '\0';
+    status_line_update();
 }

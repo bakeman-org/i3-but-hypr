@@ -40,8 +40,8 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 - `centerwindow`：把当前**浮动**窗口在工作区内居中（对平铺窗口报错，见 userguide）。
 - `snap left|right|up|down|top-left|top-right|bottom-left|bottom-right`：KDE 式快速贴边。
   浮动窗口按方向贴半屏/四分屏；同一方向连按会从“四分 → 半屏 → 整个工作区”逐级放大。
-  平铺窗口下 `left/right/up/down` 自动退化为 `focus` 移动，因此可以直接替换配置里的
-  `bindsym $mod+Left focus left`。
+  **只对浮动窗口生效**：平铺窗口由树布局管理，`snap` 对它们不做任何事，
+  方向键请继续绑定上游的 `focus left|right|up|down`，避免 fork 扩展覆盖原生语义。
 - `switcher next|prev|commit|close`：niri/mangowc 风格 Alt+Tab 缩略图切换器
   （Composite 抓图预览 + MRU 顺序 + 松开修饰键确认），见 `src/switcher.c`。
   每个 tile 只画预览，选中项用当前主题的边框渐变高亮；窗口标题统一显示在
@@ -486,23 +486,25 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 - 缩略图选中/未选中边框仍走 `client.focused` / `client.unfocused` 的边框或
   渐变，保持与窗口装饰一致。
 
-### 5. 常驻状态行（`src/status_line.c`、`include/status_line.h`，全新文件）
+### 5. i3bar 状态行（`src/status_line.c`、`include/status_line.h`，全新文件）
 
-类似 Emacs mode line 的顶部状态行，用于调试"我现在到底在什么状态/做了什么"：
+类似 Emacs mode line 的状态显示，但**输出到 i3bar 的 binding-mode 区块**，
+不创建屏幕 overlay，因此不会遮挡窗口内容：
 
 ```text
-[resize]  ws:1  layout:scroller  st tiled  last:resize grow width 10 px
+[resize] ws:1 | scroller | st tiled | last: resize grow width 10 px
 ```
 
-- 字段：binding mode（`indicator` 色）、工作区、焦点窗口所在容器布局
+- 复用 `I3_IPC_EVENT_MODE` 事件（`{"change": "...", "pango_markup": false}`），
+  由 i3bar 现有的 binding-mode 绘制路径渲染，不需要修改 i3bar；
+- 字段：binding mode、工作区、焦点窗口所在容器布局
   （splith/splitv/tabbed/stacked/scroller/dwindle/master）、焦点窗口标题、
   `tiled/floating/fullscreen`、最近执行的命令；
 - 每个 `tree_render()` 结束后刷新，并在 `parse_command()` 后立即刷新，
   保证 `nop`、mode 切换这类不触发渲染的动作也能看到；
-- 文字不变时不重绘，只把窗口重新抬到最上层（每帧一次 `ConfigureWindow`）；
-- override-redirect、不抢焦点；Shape 扩展可用时把输入区域设为空，鼠标可穿透；
-- 颜色取自 `client.focused`（背景/文字/indicator），跟随主题；
-- 新配置指令 `status_line on|off`（默认 on，`etc/config` 已开启）。
+- 文字不变时不重复发送 IPC；
+- 关闭时发送当前 binding mode（通常是 `default`），i3bar 会隐藏该区块；
+- 新配置指令 `status_line on|off`（默认 on），推荐写进 `i3ext { status_line = true }`。
 
 ## 五、上游 TODO 处理状态
 

@@ -1284,6 +1284,15 @@ IPC_HANDLER(subscribe) {
     const char *reply = "{\"success\":true}";
     ipc_send_client_message(client, strlen(reply), I3_IPC_REPLY_TYPE_SUBSCRIBE, (const uint8_t *)reply);
 
+    /* i3bar shows our status text in its binding-mode block. It starts empty,
+     * so publish the current state as soon as a client subscribes to "mode". */
+    for (int i = 0; i < client->num_events; i++) {
+        if (strcasecmp(client->events[i], "mode") == 0) {
+            status_line_refresh();
+            break;
+        }
+    }
+
     if (client->first_tick_sent) {
         return;
     }

@@ -3030,9 +3030,9 @@ static void snap_step(int *axis, int target, int *other) {
  *  - `snap top-left|top-right|bottom-left|bottom-right` jumps directly to the
  *    given quarter.
  *
- * For tiled windows the direction keys keep their usual meaning (they move
- * the focus), so `snap left` can be used as a drop-in replacement for
- * `focus left` in the configuration.
+ * `snap` only applies to floating windows. Tiled windows are laid out by the
+ * tree and must keep the upstream i3 semantics, so direction keys bound to
+ * `snap` do nothing for them (bind `focus left|right|up|down` instead).
  *
  */
 void cmd_snap(I3_CMD, const char *zone) {
@@ -3048,18 +3048,9 @@ void cmd_snap(I3_CMD, const char *zone) {
             continue;
         }
 
+        /* Tiled windows are managed by the tree layout; `snap` is a
+         * floating-window command and must not shadow `focus`. */
         if (!con_is_floating(con)) {
-            /* Tiled windows: behave like `focus left|right|up|down`. Corner
-             * zones have no focus equivalent and are ignored. */
-            if (strcmp(zone, "left") == 0) {
-                tree_next(con, D_LEFT);
-            } else if (strcmp(zone, "right") == 0) {
-                tree_next(con, D_RIGHT);
-            } else if (strcmp(zone, "up") == 0) {
-                tree_next(con, D_UP);
-            } else if (strcmp(zone, "down") == 0) {
-                tree_next(con, D_DOWN);
-            }
             continue;
         }
 

@@ -669,7 +669,7 @@ void switch_mode(const char *new_mode) {
         ipc_send_event("mode", I3_IPC_EVENT_MODE, event_msg);
         FREE(event_msg);
 
-        /* Refresh the on-screen status line (it shows the current mode). */
+        /* Refresh the i3bar status text (it shows the current mode). */
         status_line_update();
 
         return;

@@ -84,8 +84,7 @@ bindsym $mod+j focus left
 bindsym $mod+k focus right
 #bindsym $mod+l focus up
 #bindsym $mod+semicolon focus right
-# 使用方向键移动焦点（snap 是 fork 命令，平铺窗口下退化为 focus）
-# 键位已迁移到 i3ext.binds
+# 使用方向键移动焦点（与上游 i3 一致；键位见 i3ext.binds）
 
 # 使用 hjkl 移动窗口
 #bindsym $mod+Shift+j move left
@@ -181,14 +180,9 @@ mode "resize" {
 }
 
 # ---------- 配置重载与退出 ----------
-# 配置热重载：hot_reload 默认开启，保存配置文件后自动重载，无需手动绑定。
-# NOTICE, if off, should manually set a reload keybind
-hot_reload on
-# 顶部状态行（类似 Emacs mode line）：实时显示当前 binding mode、工作区、
-# 布局（scroller/tabbed/...）、焦点窗口、tiled/floating/fullscreen 以及
-# 最后执行的动作，便于调试。status_line off 可关闭。
-status_line yes
-# 需要时仍可手动触发：
+# 热重载（hot_reload）和 i3bar 状态行（status_line）是 fork 扩展，
+# 统一在下方 i3ext { ... } 块里配置，这里不再出现。
+# 热重载开启时，保存配置文件会自动 reload；下面仍保留手动 reload 键位。
 bindsym $mod+Shift+r reload
 # restart 仅在更换 i3 二进制等场景需要，按需取消注释：
 # bindsym $mod+Shift+r restart
@@ -218,6 +212,13 @@ bar {
 #   - 旧的 gaps_in / rounding / animations / dropdown_height 等原生指令
 #     仍然支持，但推荐只使用 i3ext；两者混用时按出现顺序后者覆盖
 i3ext {
+    -- fork 扩展开关
+    -- 配置热重载：保存配置文件后自动 reload（关闭则只能靠 $mod+Shift+r）
+    hot_reload = true,
+    -- i3bar 状态行：在 bar 的 binding-mode 区块实时显示当前 binding mode、
+    -- 工作区、布局、焦点窗口、tiled/floating/fullscreen 和最后执行的动作。
+    -- 不再使用屏幕 overlay，因此不会遮挡窗口内容。
+    status_line = true,
     -- 配色主题：切换整套 palette 只需修改下面这一行
     --theme = "gruber_darker",
     --theme = "onedark",
@@ -406,11 +407,16 @@ i3ext {
         { key = "Mod4+Ctrl+2", command = "snap top-right" },
         { key = "Mod4+Ctrl+3", command = "snap bottom-left" },
         { key = "Mod4+Ctrl+4", command = "snap bottom-right" },
-        -- 方向键贴边/聚焦（平铺窗口下 snap 退化为 focus）
-        { key = "Mod4+Left", command = "snap left" },
-        { key = "Mod4+Down", command = "snap down" },
-        { key = "Mod4+Up", command = "snap up" },
-        { key = "Mod4+Right", command = "snap right" },
+        -- 方向键：保持上游 i3 语义 —— 平铺/浮动窗口下都是移动焦点
+        { key = "Mod4+Left", command = "focus left" },
+        { key = "Mod4+Down", command = "focus down" },
+        { key = "Mod4+Up", command = "focus up" },
+        { key = "Mod4+Right", command = "focus right" },
+        -- 浮动窗口贴边（snap 只对浮动窗口生效，平铺窗口下无动作）
+        { key = "Mod4+Mod1+Left", command = "snap left" },
+        { key = "Mod4+Mod1+Down", command = "snap down" },
+        { key = "Mod4+Mod1+Up", command = "snap up" },
+        { key = "Mod4+Mod1+Right", command = "snap right" },
         -- 布局扩展
         { key = "Mod4+m", command = "layout master" },
         { key = "Mod4+t", command = "layout dwindle" },

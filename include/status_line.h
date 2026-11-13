@@ -4,18 +4,25 @@
  * i3 - an improved tiling window manager
  * © 2009 Michael Stapelberg and contributors (see also: LICENSE)
  *
- * status_line.h: an always-visible state line (mode, layout, focus, last action).
+ * status_line.h: publishes WM state (mode, layout, focus, last action) to i3bar.
  */
 #pragma once
 
 #include <config.h>
 
 /**
- * Recomputes the text and redraws the status line if it changed. Safe to call
+ * Recomputes the text and publishes it to i3bar if it changed. Safe to call
  * on every render; it does nothing when "status_line" is disabled.
  *
  */
 void status_line_update(void);
+
+/**
+ * Clears the cached text and publishes unconditionally. Used when a new i3bar
+ * client subscribes, so that the bar immediately shows the current state.
+ *
+ */
+void status_line_refresh(void);
 
 /**
  * Remembers the command that is about to be executed, so that the status line
@@ -25,7 +32,7 @@ void status_line_update(void);
 void status_line_set_last_command(const char *command);
 
 /**
- * Destroys the status line window.
+ * Stops publishing the status text and restores the plain binding mode.
  *
  */
 void status_line_hide(void);
