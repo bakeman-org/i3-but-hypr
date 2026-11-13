@@ -13,6 +13,10 @@ set $mod Mod4
 font pango:monospace 18
 
 # ---------- 开机自启动 ----------
+# 把 X11 会话环境导入 systemd user manager。否则 xdg-desktop-portal(-gtk) 在
+# systemd 下拿不到 DISPLAY，D-Bus 激活会一直等到超时（约 18-25 秒），
+# OBS / Flatpak / 文件选择器等程序的启动会被明显拖慢。
+exec --no-startup-id dbus-update-activation-environment --systemd DISPLAY XAUTHORITY XDG_SESSION_TYPE
 # 启动 XDG 自动启动的桌面应用
 exec --no-startup-id dex --autostart --environment i3
 # 加载 X 资源文件（如终端配色）

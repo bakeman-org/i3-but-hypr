@@ -1338,6 +1338,16 @@ void x_push_node(Con *con) {
     Con *current;
     con_state *state = state_for_frame(con->frame.id);
 
+    /* A container that is neither mapped in the tree nor mapped in X11 belongs
+     * to a hidden workspace (or to an unmapped scratchpad container). Nothing
+     * inside it can become visible without this container being rendered as
+     * mapped first, so the whole subtree can be skipped. This keeps the work
+     * per render (animations run at frame rate) proportional to the visible
+     * windows instead of all windows on all workspaces. */
+    if (!con->mapped && !state->mapped) {
+        return;
+    }
+
     /* Start animations for this container. The animation interpolates between
      * the rectangle that is currently visible in X11 (state->rect) and the
      * rectangle the layout engine computed (con->rect). */
@@ -1699,6 +1709,12 @@ void x_push_node(Con *con) {
 static void x_push_node_unmaps(Con *con) {
     Con *current;
     con_state *state = state_for_frame(con->frame.id);
+
+    /* See x_push_node(): an already unmapped subtree cannot contain a frame
+     * that still needs to be unmapped. */
+    if (!state->mapped && !con->mapped) {
+        return;
+    }
 
     /* map/unmap if map state changed, also ensure that the child window
      * is changed if we are mapped *and* in initial state (meaning the
