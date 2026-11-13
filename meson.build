@@ -495,6 +495,14 @@ install_data(
   install_dir: 'bin',
 )
 
+# Switch a running session to a newly installed binary + packaged config
+# without logging out; see README.md.
+install_data(
+  'i3-but-hypr-upgrade',
+  install_dir: 'bin',
+  install_mode: 'rwxr-xr-x',
+)
+
 install_subdir(
   'etc',
   strip_directory: true,

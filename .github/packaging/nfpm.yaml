@@ -32,6 +32,8 @@ contents:
   - src: pkg/etc/i3/config.keycodes
     dst: /etc/i3/config.keycodes
     type: config|noreplace
+scripts:
+  postinstall: .github/packaging/postinstall.sh
 overrides:
   deb:
     depends:

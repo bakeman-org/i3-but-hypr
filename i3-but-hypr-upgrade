@@ -1,0 +1,207 @@
+#!/bin/sh
+# vim:ts=4:sw=4:expandtab
+#
+# i3-but-hypr-upgrade — switch a running session to a newly installed
+# i3-but-hypr binary and to the packaged configuration without logging out.
+#
+# Typical use after installing a new .deb:
+#
+#     sudo apt install ./i3-but-hypr_*.deb
+#     i3-but-hypr-upgrade
+#
+# Why the order of the steps matters:
+#
+# The running (old) i3 validates every configuration change with its own
+# parser. A new configuration may contain directives that only the new binary
+# knows, so letting the old process reload it would only produce an error
+# popup. Therefore the session is first restarted (the old configuration is
+# still valid for the new binary in the normal case), and the new configuration
+# is installed and reloaded afterwards, when the new binary is the one doing
+# the validation. Only if the old configuration does not parse with the new
+# binary is the order reversed.
+#
+set -eu
+
+PROG=${0##*/}
+CONFIG_SOURCE=/etc/i3/config
+USER_CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/i3/config
+I3_BIN=
+KEEP_USER_CONFIG=0
+NO_RESTART=0
+
+usage() {
+    cat <<EOF
+usage: $PROG [options] [CONFIG]
+
+Install CONFIG (default: /etc/i3/config) as ~/.config/i3/config and switch the
+running session to the newly installed binary, without logging out.
+
+options:
+  -b, --binary FILE    binary to switch to (default: i3 from PATH)
+  -c, --config FILE    use FILE as the new configuration
+      --keep-user-config
+                       only restart, do not touch ~/.config/i3/config
+      --no-restart     update the configuration only (no session required)
+  -h, --help           show this help
+EOF
+}
+
+die() {
+    echo "$PROG: $*" >&2
+    exit 1
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+    -b | --binary)
+        [ $# -ge 2 ] || die "$1 needs an argument"
+        I3_BIN=$2
+        shift 2
+        ;;
+    -c | --config)
+        [ $# -ge 2 ] || die "$1 needs an argument"
+        CONFIG_SOURCE=$2
+        shift 2
+        ;;
+    --keep-user-config)
+        KEEP_USER_CONFIG=1
+        shift
+        ;;
+    --no-restart)
+        NO_RESTART=1
+        shift
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -*)
+        die "unknown option: $1 (see --help)"
+        ;;
+    *)
+        CONFIG_SOURCE=$1
+        shift
+        ;;
+    esac
+done
+
+[ -f "$CONFIG_SOURCE" ] || die "configuration not found: $CONFIG_SOURCE"
+
+if [ -z "$I3_BIN" ]; then
+    I3_BIN=$(command -v i3 2>/dev/null || true)
+fi
+[ -n "$I3_BIN" ] || die "could not find the i3 binary in PATH"
+[ -x "$I3_BIN" ] || die "not executable: $I3_BIN"
+I3_MSG=$(command -v i3-msg 2>/dev/null || true)
+
+# "i3 version 4.25-64-g28b13f52+ with bakeman's fork ..." -> 4.25-64-g28b13f52
+NEW_VERSION=$("$I3_BIN" --version | awk 'NR == 1 { print $3 }' | sed 's/+$//')
+[ -n "$NEW_VERSION" ] || die "could not determine the version of $I3_BIN"
+
+running_version() {
+    "$I3_MSG" -t get_version 2>/dev/null |
+        sed -n 's/.*"human_readable":"\([^"]*\)".*/\1/p' |
+        awk '{ print $1 }' | sed 's/+$//'
+}
+
+session_config() {
+    "$I3_MSG" -t get_version 2>/dev/null |
+        sed -n 's/.*"loaded_config_file_name":"\([^"]*\)".*/\1/p'
+}
+
+in_session() {
+    [ -n "$I3_MSG" ] && "$I3_MSG" -t get_version >/dev/null 2>&1
+}
+
+install_config() {
+    [ "$KEEP_USER_CONFIG" -eq 1 ] && return 0
+    if cmp -s "$CONFIG_SOURCE" "$USER_CONFIG"; then
+        echo "==> configuration is already up to date: $USER_CONFIG"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$USER_CONFIG")"
+    backup=
+    if [ -f "$USER_CONFIG" ]; then
+        backup=$USER_CONFIG.bak.$(date +%Y%m%d-%H%M%S)
+        cp -a "$USER_CONFIG" "$backup"
+    fi
+    # Write next to the target and rename, so the config watcher never sees a
+    # half-written file.
+    tmp=$USER_CONFIG.tmp.$$
+    cp "$CONFIG_SOURCE" "$tmp"
+    mv -f "$tmp" "$USER_CONFIG"
+    echo "==> installed configuration: $USER_CONFIG"
+    if [ -n "$backup" ]; then
+        echo "    previous configuration saved as $backup"
+    fi
+}
+
+restart_session() {
+    echo "==> restarting the session (layout and windows are kept)"
+    "$I3_MSG" restart
+
+    # Wait until the session reports the version of the installed binary.
+    tries=0
+    while [ $tries -lt 100 ]; do
+        sleep 0.1
+        version=$(running_version)
+        if [ "$version" = "$NEW_VERSION" ]; then
+            echo "==> running $NEW_VERSION"
+            return 0
+        fi
+        tries=$((tries + 1))
+    done
+    echo "warning: the session did not report version $NEW_VERSION within 10 seconds." >&2
+    echo "warning: check 'i3-msg -t get_version' and how the session was started." >&2
+    return 1
+}
+
+# 1. The new binary must accept the new configuration.
+echo "==> validating $CONFIG_SOURCE with $NEW_VERSION"
+"$I3_BIN" -C -c "$CONFIG_SOURCE" || die "the new configuration is invalid, nothing changed"
+
+if [ "$NO_RESTART" -eq 1 ]; then
+    install_config
+    echo "==> configuration updated; run 'i3-msg restart' in your session to apply it"
+    exit 0
+fi
+
+in_session || die "not connected to a running i3 session (use --no-restart to only update the configuration)"
+
+# Honour the configuration file the session was actually started with (i3 -c
+# PATH), which is not necessarily ~/.config/i3/config.
+loaded_config=$(session_config)
+if [ -n "$loaded_config" ] && [ "$loaded_config" != "$USER_CONFIG" ]; then
+    echo "==> the session uses $loaded_config; updating that file"
+    USER_CONFIG=$loaded_config
+fi
+
+# 2. Does the currently used configuration still parse with the new binary?
+#    Normally it does, which allows restarting first and never showing the old
+#    process a configuration it cannot understand.
+user_config_ok=0
+if [ -f "$USER_CONFIG" ]; then
+    if "$I3_BIN" -C -c "$USER_CONFIG" >/dev/null 2>&1; then
+        user_config_ok=1
+    fi
+fi
+
+if [ "$KEEP_USER_CONFIG" -eq 0 ] && [ -f "$USER_CONFIG" ] && [ "$user_config_ok" -eq 0 ]; then
+    # The old configuration cannot be parsed by the new binary: install the new
+    # one first, then restart into it. The old process may briefly show one
+    # error popup, but it is replaced immediately afterwards.
+    echo "==> the previous configuration is not compatible with $NEW_VERSION"
+    install_config
+    restart_session
+else
+    restart_session
+    install_config
+    if [ "$KEEP_USER_CONFIG" -eq 0 ]; then
+        # The new binary validates this reload, so new directives are fine.
+        echo "==> reloading configuration"
+        "$I3_MSG" reload
+    fi
+fi
+
+echo "==> done: $NEW_VERSION is running"
