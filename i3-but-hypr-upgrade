@@ -158,8 +158,14 @@ restart_session() {
 }
 
 # 1. The new binary must accept the new configuration.
-echo "==> validating $CONFIG_SOURCE with $NEW_VERSION"
-"$I3_BIN" -C -c "$CONFIG_SOURCE" || die "the new configuration is invalid, nothing changed"
+echo "==> validating $CONFIG_SOURCE with $NEW_VERSION ($I3_BIN)"
+if ! "$I3_BIN" -C -c "$CONFIG_SOURCE"; then
+    resolved=$(command -v i3 2>/dev/null || true)
+    echo "hint: 'i3-msg restart' re-executes 'i3' from PATH (${resolved:-not found})." >&2
+    echo "hint: if that is an old copy (e.g. from an earlier 'ninja install' into /usr/local)," >&2
+    echo "hint: remove it or put $I3_BIN earlier in PATH, otherwise the session cannot switch." >&2
+    die "the new configuration is invalid, nothing changed"
+fi
 
 if [ "$NO_RESTART" -eq 1 ]; then
     install_config

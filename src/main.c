@@ -194,6 +194,7 @@ static void i3_exit(void) {
     /* If a nagbar is active, kill it */
     kill_nagbar(config_error_nagbar_pid, false);
     kill_nagbar(command_error_nagbar_pid, false);
+    config_watcher_kill_nagbar();
 
 /* We need ev >= 4 for the following code. Since it is not *that* important (it
  * only makes sure that there are no i3-nagbar instances left behind) we still

@@ -1754,6 +1754,9 @@ void cmd_reload(I3_CMD) {
 
     kill_nagbar(config_error_nagbar_pid, false);
     kill_nagbar(command_error_nagbar_pid, false);
+    /* A successful reload also makes the hot-reload watcher's error nagbar
+     * obsolete; it owns a separate pid. */
+    config_watcher_kill_nagbar();
     /* start_nagbar() will refuse to start a new process if the passed pid is
      * set. This will happen when our child watcher is triggered by libev when
      * the loop re-starts. However, config errors might be detected before

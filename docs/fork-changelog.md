@@ -428,6 +428,10 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 - **生命周期**：初始加载后 `config_watcher_init()` 挂到 main_loop（ev_io）；
   每次 reload（含手动 reload）后 `config_watcher_rearm()` 重建监听列表
   （include 集合可能变化）；inotify 不可用时优雅降级为仅手动 reload。
+- **报错 nagbar 的清理**：热重载失败弹出的 nagbar 使用 watcher 自己的 pid，
+  原来的 `i3-msg restart` 只清理 config/command 两类 nagbar，升级后红色
+  错误条会残留到新会话。新增 `config_watcher_kill_nagbar()`，在 restart、
+  exit 以及手动 reload 成功时一并清理。
 
 ### 2. `--nest` 测试模式增强（`src/main.c`、`src/bindings.c`）
 

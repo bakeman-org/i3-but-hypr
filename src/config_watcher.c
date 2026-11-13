@@ -280,3 +280,16 @@ void config_watcher_init(void) {
     ev_io_start(main_loop, &inotify_watcher);
     LOG("config hot reload active (%s)\n", config.hot_reload ? "on" : "off");
 }
+
+/*
+ * Kills the watcher's error nagbar and forgets its pid, see
+ * config_watcher.h.
+ *
+ */
+void config_watcher_kill_nagbar(void) {
+    if (error_nagbar_pid == -1) {
+        return;
+    }
+    kill_nagbar(error_nagbar_pid, true);
+    error_nagbar_pid = -1;
+}

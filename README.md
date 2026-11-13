@@ -48,13 +48,34 @@ i3-but-hypr-upgrade [-b BINARY] [-c CONFIG] [--keep-user-config] [--no-restart]
   `./etc/config`); default `/etc/i3/config`;
 - `--keep-user-config` — restart only, do not touch `~/.config/i3/config`;
 - `--no-restart` — update the configuration without a running session;
-- `-b BINARY` — binary to switch to (default `i3` from `PATH`).
+- `-b BINARY` — binary that is validated and waited for (default `i3` from
+  `PATH`). Note that `i3-msg restart` re-executes the `i3` of the running
+  session (`PATH`/`argv[0]`), so this only overrides the check, not the switch.
 
 Configuration precedence reminder: i3 reads `~/.config/i3/config` **before**
 `/etc/i3/config`, so changing the packaged config alone has no effect while a
 user config exists. `i3-but-hypr-upgrade` keeps the two in sync; if you prefer
 to keep personal changes, put them in `~/.config/i3/config` after the copied
 content, or use `--keep-user-config` and merge manually.
+
+### troubleshooting: an old i3 shadows the package
+
+If `i3-but-hypr-upgrade` validates with an old version, `i3` in `PATH` is not the
+binary from the package. A previous `ninja install` with the default prefix
+installs the whole i3 suite into `/usr/local/bin`, which normally comes before
+`/usr/bin` in `PATH` and shadows the packaged binaries. `i3-msg restart`
+re-executes `i3` from `PATH`, so the session would keep running the old build.
+Remove the stale copies (or build with `-Dprefix=/usr`):
+
+```bash
+sudo rm -f /usr/local/bin/i3 /usr/local/bin/i3bar /usr/local/bin/i3-msg \
+           /usr/local/bin/i3-nagbar /usr/local/bin/i3-input \
+           /usr/local/bin/i3-dump-log /usr/local/bin/i3-with-shmlog
+```
+
+An alternative without removing anything is to put a symlink to the packaged
+binary earlier in `PATH`, e.g. `ln -s /usr/bin/i3 ~/.local/bin/i3` (repeat for
+the other `i3*` tools).
 
 # ref links & idea inspired by
 - hyprland's animation ...

@@ -303,6 +303,7 @@ void i3_restart(bool forget_layout) {
 
     kill_nagbar(config_error_nagbar_pid, true);
     kill_nagbar(command_error_nagbar_pid, true);
+    config_watcher_kill_nagbar();
 
     restore_geometry();
 

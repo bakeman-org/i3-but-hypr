@@ -23,3 +23,12 @@ void config_watcher_init(void);
  *
  */
 void config_watcher_rearm(void);
+
+/*
+ * Kills the error nagbar of the hot reload watcher (if any) and forgets its
+ * pid. The watcher owns a separate pid which the generic config/command nagbar
+ * cleanup does not know about, so this must be called when i3 restarts or
+ * exits, and when a manual reload succeeds.
+ *
+ */
+void config_watcher_kill_nagbar(void);
