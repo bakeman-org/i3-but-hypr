@@ -486,6 +486,21 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 - 缩略图选中/未选中边框仍走 `client.focused` / `client.unfocused` 的边框或
   渐变，保持与窗口装饰一致。
 
+### 5. 模式按键提示（`src/mode_hint.c`、`include/mode_hint.h`，全新文件）
+
+进入 `resize` 等非默认 binding mode 时，在焦点输出底部弹出一个提示窗，
+直接列出该模式的按键与命令，不用再凭记忆（尤其是 resize 的 h/j/k/l）。
+
+- override-redirect 窗口，不获取键盘/鼠标焦点，不参与 i3 的窗口管理；
+- 标题形如 `mode: resize`，左侧按键列、右侧命令列；超过 16 条时显示
+  `+ N more bindings`；
+- 切回 `default`、`reload` 或 `mode_hint off` 时自动销毁；
+- 颜色全部取自主题：面板 `client.background`、标题 `client.focused.background`
+  + `text`、按键 `client.focused.indicator`、命令 `client.focused.text`；
+- 新配置指令 `mode_hint on|off`（默认 on，`etc/config` 已开启）；
+- 注意：映射窗口前不能先绘制，X11 会在 map 时用背景色清屏（与 Alt+Tab
+  切换器相同的坑），代码里是先 map 再绘制。
+
 ## 五、上游 TODO 处理状态
 
 对仓库内全部上游遗留 TODO（`grep -irn 'TODO'`）逐条评估，结果分三类。

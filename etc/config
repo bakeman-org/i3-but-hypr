@@ -184,6 +184,9 @@ mode "resize" {
 # 配置热重载：hot_reload 默认开启，保存配置文件后自动重载，无需手动绑定。
 # NOTICE, if off, should manually set a reload keybind
 hot_reload on
+# 切换 binding mode（如 resize）时，在焦点输出底部显示该模式的按键提示，
+# 不用再凭记忆。mode_hint off 可关闭。
+mode_hint yes
 # 需要时仍可手动触发：
 bindsym $mod+Shift+r reload
 # restart 仅在更换 i3 二进制等场景需要，按需取消注释：
@@ -390,7 +393,8 @@ i3ext {
     -- fork 扩展功能键位（块外只保留上游 i3 与外部工具键位）
     binds = {
         -- 通用下拉窗口
-        { key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
+        --{ key = "Mod4+backslash", command = "exec --no-startup-id /home/etcix/.config/i3/bin/i3-dropdown-toggle" },
+        { key = "Mod4+backslash", command = "dropdown toggle" },
         { key = "Mod4+Shift+backslash", command = "dropdown recall" },
         -- 标题栏切换
         { key = "Mod4+Shift+t", command = "titlebar toggle" },

@@ -274,6 +274,7 @@ libi3 = static_library(
 i3srcs = [
   'src/animation.c',
   'src/switcher.c',
+  'src/mode_hint.c',
   'src/assignments.c',
   'src/bindings.c',
   'src/click.c',

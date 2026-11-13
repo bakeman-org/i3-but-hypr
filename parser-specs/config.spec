@@ -26,6 +26,7 @@ state INITIAL:
   'bar'                                    -> BARBRACE
   'font'                                   -> FONT
   'titlebar_font'                          -> TITLEBAR_FONT
+  'mode_hint'                              -> MODE_HINT
   'mode'                                   -> MODENAME
   'gaps_in'                                -> GAPS_IN
   'gaps_out'                               -> GAPS_OUT
@@ -369,6 +370,11 @@ state SHOW_MARKS:
 state HOT_RELOAD:
   value = word
       -> call cfg_hot_reload($value)
+
+# mode_hint <on|off>
+state MODE_HINT:
+  value = word
+      -> call cfg_mode_hint($value)
 
 state FORCE_DISPLAY_URGENCY_HINT_MS:
   'ms'

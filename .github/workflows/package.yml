@@ -94,3 +94,16 @@ jobs:
           files: |
             dist/*.deb
           generate_release_notes: false
+
+      - name: Keep only the newest 5 releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Deleting old release: $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+          done

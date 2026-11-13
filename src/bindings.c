@@ -669,6 +669,15 @@ void switch_mode(const char *new_mode) {
         ipc_send_event("mode", I3_IPC_EVENT_MODE, event_msg);
         FREE(event_msg);
 
+        /* Show the bindings of the mode on screen (the default mode has no
+         * hint). This is an override-redirect overlay which does not take
+         * focus, see src/mode_hint.c. */
+        if (config.mode_hint && strcmp(mode->name, DEFAULT_BINDING_MODE) != 0) {
+            mode_hint_show(mode);
+        } else {
+            mode_hint_hide();
+        }
+
         return;
     }
 

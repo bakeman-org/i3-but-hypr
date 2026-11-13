@@ -549,6 +549,13 @@ CFGFUN(hot_reload, const char *value) {
     config_watcher_rearm();
 }
 
+CFGFUN(mode_hint, const char *value) {
+    config.mode_hint = boolstr(value);
+    if (!config.mode_hint) {
+        mode_hint_hide();
+    }
+}
+
 static char *current_workspace = NULL;
 
 CFGFUN(workspace, const char *workspace, const char *output) {
