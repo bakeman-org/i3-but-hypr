@@ -169,9 +169,6 @@ static void free_configuration(void) {
  */
 bool load_configuration(const char *override_configpath, config_load_t load_type) {
     if (load_type == C_RELOAD) {
-        /* The reload switches back to the default binding mode; a hint of the
-         * previous mode would be stale. */
-        mode_hint_hide();
         free_configuration();
     }
 
@@ -202,8 +199,8 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     config.client.background = draw_util_hex_to_color("#11111b");
     /* Watch configuration files and reload automatically by default. */
     config.hot_reload = true;
-    /* Show the bindings of non-default modes on screen by default. */
-    config.mode_hint = true;
+    /* Show the WM state line (mode, layout, focus, last action) by default. */
+    config.status_line = true;
     INIT_COLOR(config.client.focused, "#181825", "#181825", "#cdd6f4", "#f9e2af");
     INIT_COLOR(config.client.focused_inactive, "#181825", "#181825", "#a6adc8", "#313244");
     INIT_COLOR(config.client.unfocused, "#11111b", "#11111b", "#6c7086", "#313244");

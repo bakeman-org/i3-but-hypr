@@ -549,10 +549,12 @@ CFGFUN(hot_reload, const char *value) {
     config_watcher_rearm();
 }
 
-CFGFUN(mode_hint, const char *value) {
-    config.mode_hint = boolstr(value);
-    if (!config.mode_hint) {
-        mode_hint_hide();
+CFGFUN(status_line, const char *value) {
+    config.status_line = boolstr(value);
+    if (!config.status_line) {
+        status_line_hide();
+    } else {
+        status_line_update();
     }
 }
 

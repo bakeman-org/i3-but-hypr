@@ -184,9 +184,10 @@ mode "resize" {
 # 配置热重载：hot_reload 默认开启，保存配置文件后自动重载，无需手动绑定。
 # NOTICE, if off, should manually set a reload keybind
 hot_reload on
-# 切换 binding mode（如 resize）时，在焦点输出底部显示该模式的按键提示，
-# 不用再凭记忆。mode_hint off 可关闭。
-mode_hint yes
+# 顶部状态行（类似 Emacs mode line）：实时显示当前 binding mode、工作区、
+# 布局（scroller/tabbed/...）、焦点窗口、tiled/floating/fullscreen 以及
+# 最后执行的动作，便于调试。status_line off 可关闭。
+status_line yes
 # 需要时仍可手动触发：
 bindsym $mod+Shift+r reload
 # restart 仅在更换 i3 二进制等场景需要，按需取消注释：

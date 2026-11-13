@@ -157,6 +157,9 @@ char *parse_string(const char **walk, const bool as_word) {
  */
 CommandResult *parse_command(const char *input, yajl_gen gen, ipc_client *client) {
     DLOG("COMMAND: *%.4000s*\n", input);
+#ifndef TEST_PARSER
+    status_line_set_last_command(input);
+#endif
     struct cmd_parser_ctx cmd_ctx = {0};
 
     cmd_ctx.state = INITIAL;
@@ -358,6 +361,11 @@ CommandResult *parse_command(const char *input, yajl_gen gen, ipc_client *client
     y(array_close);
 
     result->needs_tree_render = cmd_ctx.command_output.needs_tree_render;
+#ifndef TEST_PARSER
+    /* Refresh the state line immediately, even for commands that do not
+     * trigger a render (e.g. "nop" or mode changes). */
+    status_line_update();
+#endif
     /* Clean up owindows entries */
     while (!TAILQ_EMPTY(&cmd_ctx.owindows)) {
         struct owindow *ow = TAILQ_FIRST(&cmd_ctx.owindows);

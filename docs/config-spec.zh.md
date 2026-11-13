@@ -55,19 +55,21 @@
 
 ```text
 hot_reload on|off        # 默认 on
-mode_hint on|off         # 默认 on
+status_line on|off       # 默认 on
 ```
 
 - 开启后监听主配置文件与全部 `include` 文件所在目录，保存即自动重载（200 ms 防抖）。
 - 重载前会在子进程里用 `i3 -C` 校验新配置；校验失败则**保留旧配置**并用 `i3-nagbar` 弹出错误。
 - 关闭后只能手动触发重载（`i3-msg reload`）或重启（`i3-msg restart`）。
 - 编辑器中“写临时文件再 rename”的原子保存方式也能被捕获。
-- `mode_hint`：切换到非 `default` 的 binding mode（如 `resize`）时，在焦点输出底部
-  显示一个 override-redirect 提示窗，列出该模式的全部按键与命令（标题形如
-  `mode: resize`）。提示窗不获取键盘/鼠标焦点，切回 `default`、重载配置或
-  关闭该选项时自动消失；超过 16 条绑定时显示 `+ N more bindings`。
-  颜色取自 `client.background` / `client.focused`（标题栏 `background`+`text`，
-  按键用 `indicator`，命令用 `text`），跟随主题。
+- `status_line`：在焦点输出顶部显示一条常驻状态行（类似 Emacs mode line），
+  实时反映 WM 当前状态与最近一次动作，便于调试：
+  `[default] ws:1 layout:scroller st tiled last:focus right`。
+  字段依次为 binding mode（`indicator` 色）、工作区、焦点窗口所在容器的布局
+  （splith/splitv/tabbed/stacked/scroller/dwindle/master）、焦点窗口标题、
+  `tiled/floating/fullscreen`、最后执行的命令。每个渲染周期结束后刷新，
+  文字变化时才重绘；窗口为 override-redirect，不抢焦点，Shape 扩展可用时
+  设置空输入区域以允许鼠标穿透。
 
 ---
 
@@ -111,7 +113,7 @@ mode_hint on|off         # 默认 on
 | `switcher_bar <bg> <text>` | 主题 | 切换器底部标题栏底色 / 文字色 |
 | `switcher_tile <bg> <text>` | 主题 | 无缩略图窗口的贴图底色 / 文字色 |
 | `hot_reload on\|off` | 系统 | 配置热重载（默认 on） |
-| `mode_hint on\|off` | 系统 | 切换 binding mode 时显示按键提示（默认 on） |
+| `status_line on\|off` | 系统 | 顶部常驻状态行（默认 on） |
 | `i3ext { ... }` | 综合 | Lua 配置块（第十二节） |
 
 ### 2.2 新增取值 `[扩展]`
@@ -1066,7 +1068,7 @@ i3ext {
 | 动画曲线 | `easeOutQuint` | 扩展 |
 | `dropdown_height` / `dropdown_position` | 0.5 / `top` | 扩展 |
 | `hot_reload` | yes | 扩展 |
-| `mode_hint` | yes | 扩展 |
+| `status_line` | yes | 扩展 |
 | `focus_follows_mouse` | yes | — |
 | `focus_wrapping` | on | — |
 | `mouse_warping` | output | — |

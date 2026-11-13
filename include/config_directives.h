@@ -64,7 +64,7 @@ CFGFUN(focus_on_window_activation, const char *mode);
 CFGFUN(title_align, const char *alignment);
 CFGFUN(show_marks, const char *value);
 CFGFUN(hot_reload, const char *value);
-CFGFUN(mode_hint, const char *value);
+CFGFUN(status_line, const char *value);
 CFGFUN(hide_edge_borders, const char *borders);
 CFGFUN(assign_output, const char *output);
 CFGFUN(assign, const char *workspace, bool is_number);

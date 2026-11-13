@@ -51,7 +51,7 @@
 #include "drag.h"
 #include "animation.h"
 #include "switcher.h"
-#include "mode_hint.h"
+#include "status_line.h"
 #include "configuration.h"
 #include "handlers.h"
 #include "randr.h"

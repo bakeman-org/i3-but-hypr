@@ -240,9 +240,10 @@ struct Config {
      * when they change on disk ("hot_reload on|off", default: on). */
     bool hot_reload;
 
-    /** Whether an on-screen hint with the bindings of the current binding
-     * mode is shown when switching modes ("mode_hint on|off", default: on). */
-    bool mode_hint;
+    /** Whether the on-screen status line is shown. It continuously displays
+     * the current mode, layout, focused window and last action
+     * ("status_line on|off", default: on). */
+    bool status_line;
 
     /** Title alignment options. */
     enum {

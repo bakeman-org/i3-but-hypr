@@ -475,6 +475,9 @@ void tree_render(void) {
 
     x_push_changes(croot);
     DLOG("-- END RENDERING --\n");
+
+    /* Keep the state line on top and up to date after every render. */
+    status_line_update();
 }
 
 static Con *get_tree_next_workspace(Con *con, direction_t direction) {
