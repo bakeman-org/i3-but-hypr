@@ -65,6 +65,14 @@ bool floating_maybe_reassign_ws(Con *con);
 void floating_center(Con *con, Rect rect);
 
 /**
+ * Resizes a window that was just switched to floating to the configured
+ * default size (i3ext float_size) and centers it on its workspace. Does
+ * nothing when the feature is disabled.
+ *
+ */
+void floating_apply_default_size(Con *con);
+
+/**
  * Moves the given floating con to the current pointer position.
  *
  */

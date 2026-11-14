@@ -552,8 +552,9 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
 
 static const char *const i3ext_top_keys[] = {
     "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
-    "titlebar", "client", "switcher", "animations", "dropdown", "layouts",
-    "status_line", "hot_reload", "key_hints", "key_trace", "key_trace_count"};
+    "titlebar", "client", "switcher", "animations", "dropdown", "float_size",
+    "layouts", "status_line", "hot_reload", "key_hints", "key_trace",
+    "key_trace_count"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -584,6 +585,7 @@ static const char *const i3ext_animations_keys[] = {
     "workspaces", "dropdown"};
 static const char *const i3ext_anim_type_keys[] = {"duration", "curve", "enabled"};
 static const char *const i3ext_dropdown_keys[] = {"height", "position"};
+static const char *const i3ext_float_size_keys[] = {"width", "height"};
 static const char *const i3ext_layouts_keys[] = {"master", "dwindle", "scroller"};
 static const char *const i3ext_master_keys[] = {"ratio", "orientation"};
 static const char *const i3ext_dwindle_keys[] = {"split_ratio"};
@@ -1197,6 +1199,16 @@ static void i3ext_validate(lua_State *L, int table) {
         i3ext_get_number(L, dropdown, "height", "i3ext.dropdown.height", 0.1, 1.0, &height);
         i3ext_get_enum(L, dropdown, "position", "i3ext.dropdown.position",
                        positions, I3EXT_ARRAY_LEN(positions), &position);
+        lua_pop(L, 1);
+    }
+
+    if (i3ext_get_table(L, table, "float_size", "i3ext.float_size")) {
+        const int float_size = lua_absindex(L, -1);
+        i3ext_check_keys(L, float_size, "i3ext.float_size",
+                         i3ext_float_size_keys, I3EXT_ARRAY_LEN(i3ext_float_size_keys));
+        double number;
+        i3ext_get_number(L, float_size, "width", "i3ext.float_size.width", 0.01, 20000, &number);
+        i3ext_get_number(L, float_size, "height", "i3ext.float_size.height", 0.01, 20000, &number);
         lua_pop(L, 1);
     }
 
@@ -1823,7 +1835,22 @@ static void i3ext_apply(lua_State *L, int table) {
         lua_pop(L, 1);
     }
 
-    /* 10. layouts */
+    /* 10. float_size */
+    if (i3ext_get_table(L, table, "float_size", "i3ext.float_size")) {
+        const int float_size = lua_absindex(L, -1);
+        double number;
+        if (i3ext_get_number(L, float_size, "width",
+                             "i3ext.float_size.width", 0.01, 20000, &number)) {
+            config.float_size_width = number;
+        }
+        if (i3ext_get_number(L, float_size, "height",
+                             "i3ext.float_size.height", 0.01, 20000, &number)) {
+            config.float_size_height = number;
+        }
+        lua_pop(L, 1);
+    }
+
+    /* 11. layouts */
     if (i3ext_get_table(L, table, "layouts", "i3ext.layouts")) {
         const int layouts = lua_absindex(L, -1);
 

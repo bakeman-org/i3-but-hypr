@@ -956,10 +956,10 @@ i3ext {
   移除 `os`、`io`、`package`、`debug`、`require`、`load*`、`dofile`、`print` 等。
 - `i3 -C` 会执行并校验块内 Lua；未知字段、类型错误、范围错误都会导致校验失败。
 
-### 12.2 顶层键（共 18 个）
+### 12.2 顶层键（共 19 个）
 
 `binds`、`theme`、`themes`、`bar`、`gaps`、`decoration`、`opacity`、
-`titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`、
+`titlebar`、`client`、`switcher`、`animations`、`dropdown`、`float_size`、`layouts`、
 `hot_reload`、`status_line`、`key_hints`、`key_trace`、`key_trace_count`。
 
 未列出的顶层键会报 `unknown field` 并使校验失败。
@@ -1005,6 +1005,8 @@ i3ext {
 | `animations.fade_in` | 布尔 | — | `animation fadeIn` |
 | `dropdown.height` | 数字 | 0.1–1.0 | `dropdown_height` |
 | `dropdown.position` | `top` / `bottom`（**2** 项） | — | `dropdown_position` |
+| `float_size.width` | 数字 | 0.01–20000 | —（i3ext 专有） |
+| `float_size.height` | 数字 | 0.01–20000 | —（i3ext 专有） |
 | `layouts.master.ratio` | 数字 | 0.1–0.9 | `master_ratio` |
 | `layouts.master.orientation` | `left` / `right` / `top` / `bottom`（**4** 项） | — | 无原生指令 |
 | `layouts.dwindle.split_ratio` | 数字 | 0.1–0.9 | `dwindle_split_ratio` |
@@ -1024,7 +1026,7 @@ i3ext {
 `hot_reload` / `status_line` / `key_hints` / `key_trace` / `key_trace_count` →
 `binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` → `gaps` → `decoration` →
 `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` → 顶层 `switcher` → `animations` →
-`dropdown` → `layouts`。
+`dropdown` → `float_size` → `layouts`。
 
 因此顶层 `client` / `bar` / `switcher` 覆盖主题；`layouts` 最后应用。
 
@@ -1032,6 +1034,26 @@ i3ext {
 
 - 第十二节列出的原生扩展指令**全部保留**，可与 `i3ext` 混用，按出现顺序后者覆盖前者。
 - 推荐统一使用 `i3ext`；块外保留上游 i3 配置、上游命令键位与带 criteria / mode 的键位。
+
+### 12.6 浮动窗口默认尺寸（`float_size`）
+
+```lua
+i3ext {
+    float_size = { width = 0.6, height = 0.6 },   -- <= 1：工作区比例
+    -- float_size = { width = 900, height = 600 } -- > 1：像素
+}
+```
+
+`floating enable` / `floating toggle`（默认键位 `$mod+Shift+space`）把平铺窗口切成
+浮动的那一瞬间应用：先按配置设置尺寸，再在窗口所在工作区居中。
+
+- 数值 `<= 1` 视为工作区宽/高的比例（0.6 = 60%），`> 1` 视为像素；
+  两个字段必须同时给出，否则该特性保持关闭。
+- 客户端的 size hints（最小尺寸、宽高增量）与“不超过工作区”的限制仍然生效，
+  因此最终尺寸可能略小于配置值。
+- 只影响 `floating enable` / `floating toggle` 命令；`for_window ... floating enable`
+  的窗口规则、scratchpad、dropdown 等内部路径不受影响。
+- 未配置时保持上游行为：浮动窗口沿用它在 tile 状态下的大小。
 
 ---
 
@@ -1066,7 +1088,7 @@ i3ext {
 | 内置贝塞尔曲线 | 8 | `default` `linear` `easeOutCubic` `easeOutQuint` `easeOutExpo` `easeInOutCubic` `easeInOutQuint` `easeInOutSine` |
 | `dropdown_position` | 2 | `top` `bottom` |
 | master 方位（仅 i3ext） | 4 | `left` `right` `top` `bottom` |
-| i3ext 顶层键 | 13 | `binds` `theme` `themes` `bar` `gaps` `decoration` `opacity` `titlebar` `client` `switcher` `animations` `dropdown` `layouts` |
+| i3ext 顶层键 | 14 | `binds` `theme` `themes` `bar` `gaps` `decoration` `opacity` `titlebar` `client` `switcher` `animations` `dropdown` `float_size` `layouts` |
 
 ---
 

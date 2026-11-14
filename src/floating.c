@@ -559,6 +559,53 @@ void floating_center(Con *con, Rect rect) {
 }
 
 /*
+ * Resizes a window that was just switched to floating to the default size
+ * configured with i3ext.float_size and centers it on its workspace.
+ *
+ * Values <= 1 are interpreted as a fraction of the workspace size (so the
+ * result fits every output), larger values are pixels.
+ *
+ */
+void floating_apply_default_size(Con *con) {
+    if (config.float_size_width <= 0.0 || config.float_size_height <= 0.0) {
+        return;
+    }
+    if (!con_is_floating(con)) {
+        return;
+    }
+
+    Con *floating_con = con->parent;
+    Con *ws = con_get_workspace(con);
+    if (ws == NULL || ws->type != CT_WORKSPACE) {
+        return;
+    }
+
+    const int width = config.float_size_width <= 1.0
+                          ? (int)(ws->rect.width * config.float_size_width)
+                          : (int)config.float_size_width;
+    const int height = config.float_size_height <= 1.0
+                           ? (int)(ws->rect.height * config.float_size_height)
+                           : (int)config.float_size_height;
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    floating_resize(floating_con, width, height);
+
+    /* Never grow beyond the workspace. */
+    if (floating_con->rect.width > ws->rect.width) {
+        floating_con->rect.width = ws->rect.width;
+    }
+    if (floating_con->rect.height > ws->rect.height) {
+        floating_con->rect.height = ws->rect.height;
+    }
+
+    floating_center(floating_con, ws->rect);
+    DLOG("Applied default floating size: %d x %d\n",
+         floating_con->rect.width, floating_con->rect.height);
+}
+
+/*
  * Moves the given floating con to the current pointer position.
  *
  */

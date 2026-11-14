@@ -224,6 +224,10 @@ i3ext {
     key_trace = true,
     -- typed 缓冲区保留最近多少个键位（1..32）
     key_trace_count = 10,
+    -- 窗口切换成浮动（$mod+Shift+space）时的目标尺寸，并自动居中：
+    --   <= 1 视为工作区比例（0.6 = 宽高各占 60%），> 1 视为像素（如 900x600）
+    -- 不写这一段则保持上游行为（浮动后仍是 tile 时的大小）。
+    float_size = { width = 0.6, height = 0.6 },
     -- 配色主题：切换整套 palette 只需修改下面这一行
     --theme = "gruber_darker",
     --theme = "onedark",

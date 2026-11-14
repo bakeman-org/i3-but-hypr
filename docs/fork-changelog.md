@@ -160,13 +160,17 @@ Yakuake/niri 风格的通用下拉窗口：任意 GUI 窗口都可隐藏到 scra
 - 两阶段应用：先校验未知字段/类型/范围/枚举/十六进制颜色，再按固定顺序调用
   既有 `cfg_*` setter：**binds** → 主题 client → 主题 bar → gaps → decoration
   → opacity → titlebar → 顶层 client → 顶层 bar → animations → dropdown
-  → layouts。未知键和类型/范围错误是致命错误，使 `i3 -C` 失败。
+  → float_size → layouts。未知键和类型/范围错误是致命错误，使 `i3 -C` 失败。
 - `animations.<类型>` 的 `duration` 省略时沿用原值（不清零），`enabled = false`
   可关闭单个类型；`open`/`close` 分别映射 `windowsIn`/`windowsOut`，
   `fade_in` 映射 `fadeIn`；曲线先注册后应用。
 - `layouts.scroller.ignore_proportion_single` 映射到内部取反后的
   `cfg_scroller_proportion_single`；`layouts.master.orientation` 是 i3ext 新增
   能力，直接写 `config.master_orientation`。
+- `float_size = { width = .., height = .. }`：`floating enable|toggle` 把平铺
+  窗口切成浮动的瞬间，按该尺寸设置并在工作区居中（`<= 1` 为工作区比例，
+  `> 1` 为像素）。size hints 与“不超过工作区”仍生效；未配置时保持上游行为，
+  规则路径（`for_window floating enable`）、scratchpad、dropdown 不受影响。
 - IPC `get_config` 的 `raw_contents` / `variable_replaced_contents` 仍返回用户
   写入的 `i3ext { ... }`，不会暴露内部标记。
 - 原生 fork 指令全部保留，可继续使用；两者混用时按出现顺序后者覆盖。

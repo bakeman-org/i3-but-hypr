@@ -1226,6 +1226,7 @@ void cmd_floating(I3_CMD, const char *floating_mode) {
     owindow *current;
     TAILQ_FOREACH (current, &OWINDOWS, owindows) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
+        const bool was_floating = con_is_floating(current->con);
         if (strcmp(floating_mode, "toggle") == 0) {
             DLOG("should toggle mode\n");
             toggle_floating_mode(current->con, false);
@@ -1236,6 +1237,12 @@ void cmd_floating(I3_CMD, const char *floating_mode) {
             } else {
                 floating_disable(current->con);
             }
+        }
+        if (!was_floating) {
+            /* A window that just became floating keeps its tiling size, which is
+             * usually too large to move around comfortably. Apply the configured
+             * default size (i3ext float_size) and center it. */
+            floating_apply_default_size(current->con);
         }
         run_assignments(current->con->window);
     }

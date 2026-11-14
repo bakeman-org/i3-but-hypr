@@ -271,6 +271,8 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     config.animation_fade = true;
     config.dropdown_height = 0.5;
     config.dropdown_position = 0;
+    config.float_size_width = 0.0;
+    config.float_size_height = 0.0;
     config.master_ratio = 0.6;
     config.master_orientation = 0;
     config.dwindle_split_ratio = 0.5;

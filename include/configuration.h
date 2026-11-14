@@ -388,6 +388,12 @@ struct Config {
     /* Edge from which dropdown windows slide in: 0 = top, 1 = bottom. */
     int dropdown_position;
 
+    /* Default size applied when a window is switched to floating (i3ext
+     * float_size). Values <= 1 are fractions of the workspace size, larger
+     * values are pixels. 0 disables the feature. */
+    double float_size_width;
+    double float_size_height;
+
     /* Fraction of the width used by the master area in the master layout. */
     double master_ratio;
     /* Where the master area is placed: 0 = left, 1 = right, 2 = top,
