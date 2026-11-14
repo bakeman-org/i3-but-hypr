@@ -193,7 +193,7 @@ bar {
     # 使用自定义的 Go 状态栏程序
     status_command /home/etcix/go/bin/i3statusgo
     # 状态栏字体（比默认稍大，便于看清 status_line / key hints）
-    font pango:DejaVu Sans Mono 20
+    font pango:DejaVu Sans Mono 12
     # 配色由 i3ext.theme / i3ext.themes 提供；bar 块必须位于 i3ext 之前
 }
 
@@ -215,23 +215,23 @@ i3ext {
     -- i3bar 状态行：在 bar 的 binding-mode 区块实时显示当前 binding mode、
     -- 工作区、布局、焦点窗口、tiled/floating/fullscreen 和最后执行的动作。
     -- 不再使用屏幕 overlay，因此不会遮挡窗口内容。
-    status_line = true,
+    status_line = false, -- TODO: this is for debug use, don't enable it when normaly use
     -- 在状态行额外显示最后触发的键位（screenkey 风格）。
     -- 注意：只能显示被 i3 抓取的按键，普通输入不会出现。
-    key_hints = true,
+    key_hints = true, --TODO: this is for debug use, don't enable it when normaly use
     -- 追踪所有按键（XInput2 raw events，不拦截、不影响输入），显示为
     -- typed: h e l l o。开启后 state 行用 typed 取代 keys（raw 流已包含绑定键）。
-    key_trace = true,
+    key_trace = true, --TODO: this is for debug use, don't enable it when normaly use
     -- typed 缓冲区保留最近多少个键位（1..32）
-    key_trace_count = 10,
+    key_trace_count = 10,--TODO: this is for debug use, don't enable it when normaly use
     -- 窗口切换成浮动（$mod+Shift+space）时的目标尺寸，并自动居中：
     --   <= 1 视为工作区比例（0.6 = 宽高各占 60%），> 1 视为像素（如 900x600）
     -- 不写这一段则保持上游行为（浮动后仍是 tile 时的大小）。
     float_size = { width = 0.6, height = 0.6 },
     -- 配色主题：切换整套 palette 只需修改下面这一行
-    --theme = "gruber_darker",
+    theme = "gruber_darker",
     --theme = "onedark",
-    theme = "catppuccin_mocha",
+    --theme = "catppuccin_mocha",
     -- 预定义主题：name -> { client = ..., bar = ..., switcher = ... }
     --   client   : 窗口边框 / 标题栏配色
     --   bar      : i3bar 配色
