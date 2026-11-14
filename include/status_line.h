@@ -25,6 +25,14 @@ void status_line_update(void);
 void status_line_refresh(void);
 
 /**
+ * Remembers the key chord of the last matched binding, so that the status
+ * line can show it (screenkey-style). The text is published by the next
+ * status_line_update() call, which happens right after parsing the command.
+ *
+ */
+void status_line_note_key(uint32_t state_mask, const char *symbol);
+
+/**
  * Remembers the command that is about to be executed, so that the status line
  * can show it (like a verbose log of the last action).
  *

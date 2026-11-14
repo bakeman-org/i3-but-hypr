@@ -56,6 +56,7 @@
 ```text
 hot_reload on|off        # 默认 on
 status_line on|off       # 默认 on
+key_hints on|off         # 默认 off（i3ext 专有）
 ```
 
 推荐写法是放进 `i3ext { ... }` 块（Lua 布尔值），这样所有 fork 扩展集中在一处：
@@ -64,6 +65,7 @@ status_line on|off       # 默认 on
 i3ext {
     hot_reload = true,
     status_line = true,
+    key_hints = true,
 }
 ```
 
@@ -73,13 +75,16 @@ i3ext {
 - 编辑器中“写临时文件再 rename”的原子保存方式也能被捕获。
 - `status_line`：把 WM 当前状态与最近一次动作发布到 **i3bar 的 binding-mode 区块**，
   不创建任何屏幕 overlay，因此不会遮挡窗口内容。显示格式：
-  `[default] ws:1 | scroller | st tiled | last: focus right`。
+  `[default] ws:1 | scroller | st tiled | keys: Mod4+Shift+r | last: reload`。
   字段依次为 binding mode、工作区、焦点窗口所在容器的布局
   （splith/splitv/tabbed/stacked/scroller/dwindle/master）、焦点窗口标题、
-  `tiled/floating/fullscreen`、最后执行的命令。文字变化时才发布；
-  i3bar 未运行时该功能无副作用。
+  `tiled/floating/fullscreen`、最后触发的键位（`key_hints` 开启时）、
+  最后执行的命令。文字变化时才发布；i3bar 未运行时该功能无副作用。
+- `key_hints`：在状态行增加 `keys:` 段，显示最后一次匹配到的键位组合，
+  类似 screenkey。**只能显示被 i3 抓取的按键**（即已配置的 keybinding），
+  普通输入不会出现在这里。默认关闭，示例配置中开启。
 
-> 这两个指令仍然是合法的原生语法，但 fork 扩展一律推荐写在 `i3ext {}` 中；
+> 这些开关仍然是合法的原生语法（`key_hints` 除外），但 fork 扩展一律推荐写在 `i3ext {}` 中；
 > `i3ext` 与原生指令不要混用。
 
 ---
@@ -939,11 +944,11 @@ i3ext {
   移除 `os`、`io`、`package`、`debug`、`require`、`load*`、`dofile`、`print` 等。
 - `i3 -C` 会执行并校验块内 Lua；未知字段、类型错误、范围错误都会导致校验失败。
 
-### 12.2 顶层键（共 15 个）
+### 12.2 顶层键（共 16 个）
 
 `binds`、`theme`、`themes`、`bar`、`gaps`、`decoration`、`opacity`、
 `titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`、
-`hot_reload`、`status_line`。
+`hot_reload`、`status_line`、`key_hints`。
 
 未列出的顶层键会报 `unknown field` 并使校验失败。
 
@@ -953,6 +958,7 @@ i3ext {
 |------|------------|------|-------------|
 | `hot_reload` | 布尔 | — | `hot_reload` |
 | `status_line` | 布尔 | — | `status_line` |
+| `key_hints` | 布尔 | — | —（i3ext 专有） |
 | `binds[]` | 表数组，键 `key`/`command`/`release`/`type` | — | `bindsym` |
 | `binds[].type` | `bindsym` / `bindcode`（**2** 项） | — | `bindsym` / `bindcode` |
 | `theme` | 主题名字符串 | — | —（仅 i3ext 主题） |
@@ -1001,9 +1007,9 @@ i3ext {
 
 固定为：
 
-`hot_reload` / `status_line` → `binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` →
-`gaps` → `decoration` → `opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` →
-顶层 `switcher` → `animations` → `dropdown` → `layouts`。
+`hot_reload` / `status_line` / `key_hints` → `binds` → 主题 `client` → 主题 `bar` →
+主题 `switcher` → `gaps` → `decoration` → `opacity` → `titlebar` → 顶层 `client` →
+顶层 `bar` → 顶层 `switcher` → `animations` → `dropdown` → `layouts`。
 
 因此顶层 `client` / `bar` / `switcher` 覆盖主题；`layouts` 最后应用。
 

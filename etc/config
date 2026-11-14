@@ -192,8 +192,8 @@ bar {
     position bottom
     # 使用自定义的 Go 状态栏程序
     status_command /home/etcix/go/bin/i3statusgo
-    # 状态栏字体
-    font pango:DejaVu Sans Mono 10
+    # 状态栏字体（比默认稍大，便于看清 status_line / key hints）
+    font pango:DejaVu Sans Mono 12
     # 配色由 i3ext.theme / i3ext.themes 提供；bar 块必须位于 i3ext 之前
 }
 
@@ -216,6 +216,9 @@ i3ext {
     -- 工作区、布局、焦点窗口、tiled/floating/fullscreen 和最后执行的动作。
     -- 不再使用屏幕 overlay，因此不会遮挡窗口内容。
     status_line = true,
+    -- 在状态行额外显示最后触发的键位（screenkey 风格）。
+    -- 注意：只能显示被 i3 抓取的按键，普通输入不会出现。
+    key_hints = true,
     -- 配色主题：切换整套 palette 只需修改下面这一行
     --theme = "gruber_darker",
     --theme = "onedark",

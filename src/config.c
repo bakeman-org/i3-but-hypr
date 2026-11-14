@@ -201,6 +201,8 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
     config.hot_reload = true;
     /* Show the WM state line (mode, layout, focus, last action) by default. */
     config.status_line = true;
+    /* Showing the last key chord is opt-in via i3ext { key_hints = true }. */
+    config.key_hints = false;
     INIT_COLOR(config.client.focused, "#181825", "#181825", "#cdd6f4", "#f9e2af");
     INIT_COLOR(config.client.focused_inactive, "#181825", "#181825", "#a6adc8", "#313244");
     INIT_COLOR(config.client.unfocused, "#11111b", "#11111b", "#6c7086", "#313244");

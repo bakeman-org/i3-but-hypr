@@ -553,7 +553,7 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
 static const char *const i3ext_top_keys[] = {
     "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
     "titlebar", "client", "switcher", "animations", "dropdown", "layouts",
-    "status_line", "hot_reload"};
+    "status_line", "hot_reload", "key_hints"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -1573,6 +1573,10 @@ static void i3ext_apply(lua_State *L, int table) {
     }
     if (i3ext_get_bool(L, table, "status_line", "i3ext.status_line", &enabled)) {
         cfg_status_line(NULL, &result, enabled ? "yes" : "no");
+    }
+    if (i3ext_get_bool(L, table, "key_hints", "i3ext.key_hints", &enabled)) {
+        config.key_hints = enabled;
+        status_line_update();
     }
 
     /* 0. fork extension keybindings */

@@ -36,6 +36,17 @@ void handle_key_press(xcb_key_press_event_t *event) {
         return;
     }
 
+    /* Remember the chord that fired, so the i3bar status line can show it
+     * (screenkey-style). Unbound keys never reach i3, so they cannot be
+     * displayed here. */
+    char fallback[24];
+    const char *symbol = bind->symbol;
+    if (symbol == NULL) {
+        snprintf(fallback, sizeof(fallback), "key %u", (unsigned)event->detail);
+        symbol = fallback;
+    }
+    status_line_note_key(bind->event_state_mask, symbol);
+
     CommandResult *result = run_binding(bind, NULL);
     command_result_free(result);
 }

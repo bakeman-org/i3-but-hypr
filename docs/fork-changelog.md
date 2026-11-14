@@ -506,19 +506,23 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 不创建屏幕 overlay，因此不会遮挡窗口内容：
 
 ```text
-[resize] ws:1 | scroller | st tiled | last: resize grow width 10 px
+[resize] ws:1 | scroller | st tiled | keys: Mod4+Shift+r | last: reload
 ```
 
 - 复用 `I3_IPC_EVENT_MODE` 事件（`{"change": "...", "pango_markup": false}`），
   由 i3bar 现有的 binding-mode 绘制路径渲染，不需要修改 i3bar；
 - 字段：binding mode、工作区、焦点窗口所在容器布局
   （splith/splitv/tabbed/stacked/scroller/dwindle/master）、焦点窗口标题、
-  `tiled/floating/fullscreen`、最近执行的命令；
+  `tiled/floating/fullscreen`、最后一次匹配的键位（`key_hints`）、最近执行的命令；
+- `key_hints`（默认 off）：在 `key_press.c` 里把匹配到的 Binding 的
+  `event_state_mask` + `symbol` 格式化成 `Mod4+Shift+r`，类似 screenkey。
+  由于 i3 只接收被 grab 的按键，这里只显示已配置的 keybinding；
 - 每个 `tree_render()` 结束后刷新，并在 `parse_command()` 后立即刷新，
   保证 `nop`、mode 切换这类不触发渲染的动作也能看到；
 - 文字不变时不重复发送 IPC；
 - 关闭时发送当前 binding mode（通常是 `default`），i3bar 会隐藏该区块；
-- 新配置指令 `status_line on|off`（默认 on），推荐写进 `i3ext { status_line = true }`。
+- 新配置指令 `status_line on|off`（默认 on），推荐写进 `i3ext { status_line = true }`；
+- `i3ext { key_hints = true }` 开启键位显示，不提供原生指令。
 
 ## 五、上游 TODO 处理状态
 

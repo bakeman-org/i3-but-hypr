@@ -245,6 +245,11 @@ struct Config {
      * ("status_line on|off", default: on). */
     bool status_line;
 
+    /** Whether the status line additionally shows the key chord of the last
+     * matched keybinding (screenkey-style). Only keys grabbed by i3 are
+     * visible here ("key_hints", i3ext only, default: off). */
+    bool key_hints;
+
     /** Title alignment options. */
     enum {
         ALIGN_LEFT,

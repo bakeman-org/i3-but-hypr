@@ -16,8 +16,32 @@
 /* Cached text, so that we only publish when something changed. */
 static char line_text[1024] = "";
 static char last_command[512] = "";
+static char last_keys[96] = "";
 
 static void utf8_truncate_tail(char *str);
+
+void status_line_note_key(uint32_t state_mask, const char *symbol) {
+    if (!config.key_hints) {
+        return;
+    }
+
+    if (symbol == NULL || symbol[0] == '\0') {
+        symbol = "?";
+    }
+
+    char mods[48];
+    snprintf(mods, sizeof(mods), "%s%s%s%s%s%s%s",
+             (state_mask & XCB_MOD_MASK_4) ? "Mod4+" : "",
+             (state_mask & XCB_MOD_MASK_1) ? "Mod1+" : "",
+             (state_mask & XCB_MOD_MASK_2) ? "Mod2+" : "",
+             (state_mask & XCB_MOD_MASK_3) ? "Mod3+" : "",
+             (state_mask & XCB_MOD_MASK_5) ? "Mod5+" : "",
+             (state_mask & XCB_MOD_MASK_CONTROL) ? "Ctrl+" : "",
+             (state_mask & XCB_MOD_MASK_SHIFT) ? "Shift+" : "");
+
+    snprintf(last_keys, sizeof(last_keys), "%s%s", mods, symbol);
+    utf8_truncate_tail(last_keys);
+}
 
 void status_line_set_last_command(const char *command) {
     if (command == NULL) {
@@ -178,10 +202,17 @@ static void build_text(char *buf, size_t len) {
     short_last[last_len] = '\0';
     utf8_truncate_tail(short_last);
 
-    snprintf(buf, len, "[%s] %s | %s | %s%s | last: %s",
-             current_binding_mode != NULL ? current_binding_mode : "default",
-             ws_name, layout, short_title, state,
-             short_last[0] != '\0' ? short_last : "-");
+    if (config.key_hints && last_keys[0] != '\0') {
+        snprintf(buf, len, "[%s] %s | %s | %s%s | keys: %s | last: %s",
+                 current_binding_mode != NULL ? current_binding_mode : "default",
+                 ws_name, layout, short_title, state, last_keys,
+                 short_last[0] != '\0' ? short_last : "-");
+    } else {
+        snprintf(buf, len, "[%s] %s | %s | %s%s | last: %s",
+                 current_binding_mode != NULL ? current_binding_mode : "default",
+                 ws_name, layout, short_title, state,
+                 short_last[0] != '\0' ? short_last : "-");
+    }
 }
 
 void status_line_update(void) {
