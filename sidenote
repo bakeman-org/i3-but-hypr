@@ -23,4 +23,4 @@ ninja install
 
 Extended at config must in the i3ext {} block
 
-
+make nest window testable on hyprland or niri
