@@ -1339,6 +1339,22 @@ IPC_HANDLER(get_config) {
     }
     y(array_close);
 
+    /* Themes available for the runtime theme switcher (`theme <name>`). */
+    ystr("themes");
+    y(array_open);
+    for (int i = 0; i < i3ext_theme_count(); i++) {
+        ystr(i3ext_theme_name(i));
+    }
+    y(array_close);
+
+    ystr("current_theme");
+    const int current_theme = i3ext_theme_current();
+    if (current_theme >= 0) {
+        ystr(i3ext_theme_name(current_theme));
+    } else {
+        y(null);
+    }
+
     y(map_close);
 
     const unsigned char *payload;

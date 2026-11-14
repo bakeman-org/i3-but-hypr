@@ -526,6 +526,24 @@ executable(
   ],
 )
 
+# Native theme picker for i3ext.themes (`i3-msg theme <name>`).
+executable(
+  'i3-theme-switcher',
+  'i3-theme-switcher.c',
+  install: true,
+  include_directories: inc,
+  dependencies: [
+    m_dep,
+    xcb_dep,
+    xcb_shape_dep,
+    xcb_util_dep,
+    xcb_util_keysyms_dep,
+    cairo_dep,
+    pangocairo_dep,
+    glib_dep,
+  ],
+)
+
 install_subdir(
   'etc',
   strip_directory: true,

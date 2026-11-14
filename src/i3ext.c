@@ -1573,10 +1573,49 @@ static bool i3ext_push_selected_theme(lua_State *L, int table) {
     return true;
 }
 
+/* Applies the client/bar/switcher sections of one theme table. */
+static void i3ext_apply_theme_sections(lua_State *L, int theme, struct ConfigResultIR *result) {
+    if (i3ext_get_table(L, theme, "client", "i3ext.theme.client")) {
+        i3ext_apply_client(L, -1, "i3ext.theme.client", result);
+        lua_pop(L, 1);
+    }
+    if (i3ext_get_table(L, theme, "bar", "i3ext.theme.bar")) {
+        i3ext_apply_bar(L, -1, "i3ext.theme.bar", result);
+        lua_pop(L, 1);
+    }
+    if (i3ext_get_table(L, theme, "switcher", "i3ext.theme.switcher")) {
+        i3ext_apply_switcher(L, -1, "i3ext.theme.switcher", result);
+        lua_pop(L, 1);
+    }
+}
+
+/* Applies the top-level client/bar/switcher overrides (they win over the
+ * theme selected via i3ext.theme). */
+static void i3ext_apply_top_overrides(lua_State *L, int table, struct ConfigResultIR *result) {
+    if (i3ext_get_table(L, table, "client", "i3ext.client")) {
+        i3ext_apply_client(L, -1, "i3ext.client", result);
+        lua_pop(L, 1);
+    }
+    if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
+        i3ext_apply_bar(L, -1, "i3ext.bar", result);
+        lua_pop(L, 1);
+    }
+    if (i3ext_get_table(L, table, "switcher", "i3ext.switcher")) {
+        i3ext_apply_switcher(L, -1, "i3ext.switcher", result);
+        lua_pop(L, 1);
+    }
+}
+
+static void i3ext_theme_collect_presets(lua_State *L, int table, struct ConfigResultIR *result);
+static void i3ext_theme_presets_begin(void);
+
 static void i3ext_apply(lua_State *L, int table) {
     struct ConfigResultIR result = {0};
     table = lua_absindex(L, table);
     char value[64];
+
+    /* Snapshot the pre-theme colors for the runtime theme presets. */
+    i3ext_theme_presets_begin();
 
     /* Fork-wide switches live inside i3ext, not as native i3 directives. */
     bool enabled;
@@ -1646,18 +1685,7 @@ static void i3ext_apply(lua_State *L, int table) {
     /* 0.5 selected theme: client first, then bar and switcher. */
     if (i3ext_push_selected_theme(L, table)) {
         const int theme = lua_absindex(L, -1);
-        if (i3ext_get_table(L, theme, "client", "i3ext.theme.client")) {
-            i3ext_apply_client(L, -1, "i3ext.theme.client", &result);
-            lua_pop(L, 1);
-        }
-        if (i3ext_get_table(L, theme, "bar", "i3ext.theme.bar")) {
-            i3ext_apply_bar(L, -1, "i3ext.theme.bar", &result);
-            lua_pop(L, 1);
-        }
-        if (i3ext_get_table(L, theme, "switcher", "i3ext.theme.switcher")) {
-            i3ext_apply_switcher(L, -1, "i3ext.theme.switcher", &result);
-            lua_pop(L, 1);
-        }
+        i3ext_apply_theme_sections(L, theme, &result);
         lua_pop(L, 1);
     }
 
@@ -1751,23 +1779,8 @@ static void i3ext_apply(lua_State *L, int table) {
         lua_pop(L, 1);
     }
 
-    /* 5. top-level client (overrides the theme) */
-    if (i3ext_get_table(L, table, "client", "i3ext.client")) {
-        i3ext_apply_client(L, -1, "i3ext.client", &result);
-        lua_pop(L, 1);
-    }
-
-    /* 5.5 top-level bar (overrides the theme) */
-    if (i3ext_get_table(L, table, "bar", "i3ext.bar")) {
-        i3ext_apply_bar(L, -1, "i3ext.bar", &result);
-        lua_pop(L, 1);
-    }
-
-    /* 5.6 top-level switcher (overrides the theme) */
-    if (i3ext_get_table(L, table, "switcher", "i3ext.switcher")) {
-        i3ext_apply_switcher(L, -1, "i3ext.switcher", &result);
-        lua_pop(L, 1);
-    }
+    /* 5. top-level client/bar/switcher (overrides the theme) */
+    i3ext_apply_top_overrides(L, table, &result);
 
     /* 8. animations: enabled, beziers, then the individual types. */
     if (i3ext_get_table(L, table, "animations", "i3ext.animations")) {
@@ -1928,6 +1941,188 @@ static void i3ext_apply(lua_State *L, int table) {
         }
         lua_pop(L, 1);
     }
+
+    /* Collect the runtime theme presets last: every theme is applied once on
+     * top of the pre-theme baseline (plus the top-level overrides) and its
+     * resolved colors are stored. The selected theme is restored afterwards. */
+    i3ext_theme_collect_presets(L, table, &result);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Theme presets used by the runtime theme switcher (`theme <name>`). */
+
+#define THEME_BAR_FIELDS(X)                                                              \
+    X(background) X(statusline) X(separator)                                             \
+        X(focused_background) X(focused_statusline) X(focused_separator)                 \
+            X(focused_workspace_border) X(focused_workspace_bg) X(focused_workspace_text) \
+                X(active_workspace_border) X(active_workspace_bg) X(active_workspace_text) \
+                    X(inactive_workspace_border) X(inactive_workspace_bg)                  \
+                        X(inactive_workspace_text) X(urgent_workspace_border)              \
+                            X(urgent_workspace_bg) X(urgent_workspace_text)                \
+                                X(binding_mode_border) X(binding_mode_bg) X(binding_mode_text)
+
+struct theme_preset {
+    char *name;
+    struct config_client client;
+    struct config_switcher switcher;
+    struct bar_colors bar;
+};
+
+static struct theme_preset *theme_presets;
+static int theme_preset_count;
+static int theme_current_index = -1;
+
+static struct config_client theme_baseline_client;
+static struct config_switcher theme_baseline_switcher;
+static struct bar_colors theme_baseline_bar;
+static bool theme_baseline_valid;
+
+static void theme_bar_free(struct bar_colors *bar) {
+#define X(field) FREE(bar->field);
+    THEME_BAR_FIELDS(X)
+#undef X
+}
+
+static void theme_bar_snapshot(struct bar_colors *dst) {
+    memset(dst, 0, sizeof(*dst));
+    Barconfig *barconfig = TAILQ_FIRST(&barconfigs);
+    if (barconfig == NULL) {
+        return;
+    }
+#define X(field) dst->field = (barconfig->colors.field != NULL ? sstrdup(barconfig->colors.field) : NULL);
+    THEME_BAR_FIELDS(X)
+#undef X
+}
+
+static void theme_bar_apply(const struct bar_colors *src) {
+    Barconfig *barconfig;
+    TAILQ_FOREACH (barconfig, &barconfigs, configs) {
+#define X(field)                                             \
+    do {                                                     \
+        FREE(barconfig->colors.field);                       \
+        barconfig->colors.field =                            \
+            (src->field != NULL ? sstrdup(src->field) : NULL); \
+    } while (0);
+        THEME_BAR_FIELDS(X)
+#undef X
+    }
+}
+
+static void i3ext_theme_presets_reset(void) {
+    for (int i = 0; i < theme_preset_count; i++) {
+        free(theme_presets[i].name);
+        theme_bar_free(&theme_presets[i].bar);
+    }
+    FREE(theme_presets);
+    theme_preset_count = 0;
+    theme_current_index = -1;
+}
+
+/* Remembers the colors as they are before i3ext.theme is applied, so that each
+ * preset only contains its own values. */
+static void i3ext_theme_presets_begin(void) {
+    i3ext_theme_presets_reset();
+    theme_baseline_client = config.client;
+    theme_baseline_switcher = config.switcher;
+    theme_bar_free(&theme_baseline_bar);
+    theme_bar_snapshot(&theme_baseline_bar);
+    theme_baseline_valid = true;
+}
+
+static void i3ext_theme_collect_presets(lua_State *L, int table, struct ConfigResultIR *result) {
+    lua_getfield(L, table, "themes");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return;
+    }
+    const int themes = lua_absindex(L, -1);
+
+    const char *selected = I3EXT_DEFAULT_THEME;
+    lua_getfield(L, table, "theme");
+    if (!lua_isnil(L, -1)) {
+        selected = lua_tostring(L, -1);
+    }
+    lua_pop(L, 1);
+
+    lua_pushnil(L);
+    while (lua_next(L, themes) != 0) {
+        const char *name = lua_tostring(L, -2);
+        if (name == NULL) {
+            lua_pop(L, 1);
+            continue;
+        }
+        const int theme = lua_absindex(L, -1);
+
+        if (theme_baseline_valid) {
+            config.client = theme_baseline_client;
+            config.switcher = theme_baseline_switcher;
+            theme_bar_apply(&theme_baseline_bar);
+        }
+        i3ext_apply_theme_sections(L, theme, result);
+        i3ext_apply_top_overrides(L, table, result);
+
+        theme_presets = srealloc(theme_presets,
+                                 sizeof(*theme_presets) * (theme_preset_count + 1));
+        struct theme_preset *preset = &theme_presets[theme_preset_count];
+        memset(preset, 0, sizeof(*preset));
+        preset->name = sstrdup(name);
+        preset->client = config.client;
+        preset->switcher = config.switcher;
+        theme_bar_snapshot(&preset->bar);
+        if (strcmp(name, selected) == 0) {
+            theme_current_index = theme_preset_count;
+        }
+        theme_preset_count++;
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+
+    /* Restore the selected theme: the loop above left the last one applied. */
+    if (theme_current_index >= 0) {
+        const struct theme_preset *preset = &theme_presets[theme_current_index];
+        config.client = preset->client;
+        config.switcher = preset->switcher;
+        theme_bar_apply(&preset->bar);
+    }
+}
+
+int i3ext_theme_count(void) {
+    return theme_preset_count;
+}
+
+const char *i3ext_theme_name(int index) {
+    if (index < 0 || index >= theme_preset_count) {
+        return NULL;
+    }
+    return theme_presets[index].name;
+}
+
+int i3ext_theme_current(void) {
+    return theme_current_index;
+}
+
+bool i3ext_theme_apply_index(int index) {
+    if (index < 0 || index >= theme_preset_count) {
+        return false;
+    }
+    const struct theme_preset *preset = &theme_presets[index];
+    config.client = preset->client;
+    config.switcher = preset->switcher;
+    theme_bar_apply(&preset->bar);
+    theme_current_index = index;
+    return true;
+}
+
+bool i3ext_theme_apply_name(const char *name) {
+    if (name == NULL) {
+        return false;
+    }
+    for (int i = 0; i < theme_preset_count; i++) {
+        if (strcmp(theme_presets[i].name, name) == 0) {
+            return i3ext_theme_apply_index(i);
+        }
+    }
+    return false;
 }
 
 static int i3ext_lua_i3ext(lua_State *L) {

@@ -68,6 +68,21 @@ char *i3ext_preprocess(const char *contents, const char *filename,
  */
 bool i3ext_run(long index);
 
+/**
+ * Theme presets collected from `i3ext.themes`.
+ *
+ * While the configuration is applied, every theme's client/bar/switcher colors
+ * are resolved once (including the top-level client/bar/switcher overrides) and
+ * stored, so that a theme can be switched at runtime without re-parsing the
+ * Lua block.
+ */
+int i3ext_theme_count(void);
+const char *i3ext_theme_name(int index);
+/* Index of the currently applied theme, or -1. */
+int i3ext_theme_current(void);
+bool i3ext_theme_apply_index(int index);
+bool i3ext_theme_apply_name(const char *name);
+
 /* Used by the scanner unit test. Returns the number of registered chunks. */
 size_t i3ext_registry_count(void);
 

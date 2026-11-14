@@ -35,6 +35,7 @@ state INITIAL:
   'debuglog' -> DEBUGLOG
   'border' -> BORDER
   'titlebar' -> TITLEBAR
+  'theme' -> THEME
   'layout' -> LAYOUT
   'append_layout' -> APPEND_LAYOUT
   'workspace' -> WORKSPACE
@@ -138,6 +139,11 @@ state BORDER_WIDTH:
 state TITLEBAR:
   titlebar_style = 'normal', 'none', 'toggle'
     -> call cmd_titlebar($titlebar_style)
+
+# theme <name>
+state THEME:
+  theme_name = string
+    -> call cmd_theme($theme_name)
 
 # gaps inner|outer|horizontal|vertical|top|right|bottom|left [current] [set|plus|minus|toggle] <px>
 state GAPS:

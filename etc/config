@@ -503,5 +503,8 @@ i3ext {
 # 几何，贴边窗口不会因为切换标题栏而溢出。需要单独隐藏标题栏时可用
 # i3-msg 'titlebar toggle'。
 bindsym $mod+u border toggle
+# $mod+Shift+t：主题切换器（列出 i3ext.themes 中预设的主题）
+# ↑↓ / j k 选择，Enter 应用，Esc 取消；也可以直接用 i3-msg theme <name>
+bindsym $mod+Shift+t exec --no-startup-id i3-theme-switcher
 # 其余 fork 扩展键位（dropdown、layout、snap、switcher 等）
 # 已迁移到上方 i3ext.binds；tabbed / toggle split / resize 等上游键位留在前面。

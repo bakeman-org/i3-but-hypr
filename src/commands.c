@@ -805,6 +805,41 @@ void cmd_titlebar(I3_CMD, const char *titlebar_style) {
 }
 
 /*
+ * Implementation of 'theme <name>': switches to one of the themes defined in
+ * i3ext.themes without reloading the configuration.
+ *
+ */
+void cmd_theme(I3_CMD, const char *theme_name) {
+    DLOG("switching to theme %s\n", theme_name);
+    if (strcmp(theme_name, "next") == 0 || strcmp(theme_name, "prev") == 0) {
+        const int count = i3ext_theme_count();
+        if (count == 0) {
+            yerror("No themes defined in i3ext.themes");
+            return;
+        }
+        const int delta = (strcmp(theme_name, "next") == 0 ? 1 : -1);
+        const int current = i3ext_theme_current();
+        const int index = (current < 0)
+                              ? (delta > 0 ? 0 : count - 1)
+                              : ((current + delta) % count + count) % count;
+        i3ext_theme_apply_index(index);
+    } else if (!i3ext_theme_apply_name(theme_name)) {
+        yerror("No theme named \"%s\" (see i3ext.themes in your config)", theme_name);
+        return;
+    }
+
+    /* Push the new colors to the running i3bar instances and redraw the
+     * titlebars/borders of all windows. */
+    Barconfig *barconfig;
+    TAILQ_FOREACH (barconfig, &barconfigs, configs) {
+        ipc_send_barconfig_update_event(barconfig);
+    }
+    x_update_frame_backgrounds();
+    cmd_output->needs_tree_render = true;
+    ysuccess(true);
+}
+
+/*
  * Implementation of 'nop <comment>'.
  *
  */

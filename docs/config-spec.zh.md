@@ -1251,3 +1251,64 @@ i3ext {
     },
 }
 ```
+
+## 十三、主题切换 `[扩展]`
+
+`i3ext.themes` 里预定义的主题可以在运行时切换，不用重载配置。
+
+### 13.1 切换命令
+
+```text
+theme <名称>
+```
+
+- 名称必须是 `i3ext.themes` 已定义的键；未知名称返回错误：
+  `No theme named "xxx" (see i3ext.themes in your config)`。
+- 切换只改**颜色**：窗口边框/标题栏（含渐变）、i3bar 配色、Alt+Tab 切换器配色。
+  `gaps`、动画、布局、键位等不会变化（它们不属于主题）。
+- 应用后立即推送 `barconfig_update` 事件并重绘所有窗口，无需 `reload`。
+
+```bash
+i3-msg theme catppuccin_mocha
+i3-msg theme onedark
+```
+
+也可在 `i3ext.binds` 或原生 `bindsym` 里绑定：
+
+```lua
+binds = {
+    { key = "Mod4+Ctrl+t", command = "theme next" }, -- 可选，见下
+}
+```
+
+### 13.2 主题切换器（`i3-theme-switcher`）
+
+纯 C（xcb + cairo + pango）的原生选择器，列出 `i3ext.themes` 中的全部主题：
+
+```bash
+i3-theme-switcher
+```
+
+```text
+bindsym $mod+Shift+t exec --no-startup-id i3-theme-switcher
+```
+
+- `↑`/`↓` 或 `j`/`k` 选择，`PgUp`/`PgDn` 翻 5 项，`Home`/`End` 跳首尾；
+- `Enter` 应用并关闭，`Esc` / `q` 取消；
+- `1`–`9` 直接应用对应序号；
+- 鼠标点击某一行应用，滚轮上下选择；
+- 当前生效的主题前有 `●` 标记；主题多于 12 个时右侧显示滚动条。
+
+主题列表和当前主题通过 IPC 获取：`GET_CONFIG` 的回复新增
+`"themes": ["..."]` 与 `"current_theme": "..."` 两个字段（其它字段不变，
+`i3-msg -r -t get_config` 可看到原始 JSON）。
+
+### 13.3 预设是如何收集的
+
+配置解析时，`i3ext` 会按“默认样式 → 该主题 → 顶层 `client`/`bar`/`switcher`
+覆盖”的顺序把每个主题解析一遍，把最终的 client/bar/switcher 颜色存成预设；
+随后恢复 `theme = "..."` 选中的那一套。因此：
+
+- 顶层覆盖对每个主题都生效（和配置里的语义一致）；
+- 主题可以只写部分字段，未写的沿用默认样式，不会串到上一个主题；
+- 运行时切换只是把预设颜色拷回去，不重新执行 Lua，也不会影响键位和布局。

@@ -86,6 +86,7 @@ void cmd_border(I3_CMD, const char *border_style_str, long border_width);
  *
  */
 void cmd_titlebar(I3_CMD, const char *titlebar_style);
+void cmd_theme(I3_CMD, const char *theme_name);
 
 /**
  * Implementation of 'nop <comment>'.
