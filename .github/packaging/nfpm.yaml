@@ -51,6 +51,7 @@ overrides:
       - libxcb-shm0
       - libxcb-image0
       - libxcb-render-util0
+      - libxcb-xinput0
       - libxkbcommon0
       - libxkbcommon-x11-0
       - libstartup-notification0

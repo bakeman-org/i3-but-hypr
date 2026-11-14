@@ -1444,6 +1444,7 @@ void handle_event(int type, xcb_generic_event_t *event) {
             keysyms = xcb_key_symbols_alloc(conn);
             if (((xcb_xkb_new_keyboard_notify_event_t *)event)->changed & XCB_XKB_NKN_DETAIL_KEYCODES) {
                 (void)load_keymap();
+                key_trace_reload_keymap();
             }
             ungrab_all_keys(conn);
             translate_keysyms();
@@ -1460,6 +1461,7 @@ void handle_event(int type, xcb_generic_event_t *event) {
                 translate_keysyms();
                 grab_all_keys(conn);
                 (void)load_keymap();
+                key_trace_reload_keymap();
             }
         } else if (state->xkbType == XCB_XKB_STATE_NOTIFY) {
             DLOG("xkb state group = %d\n", state->group);
@@ -1471,6 +1473,10 @@ void handle_event(int type, xcb_generic_event_t *event) {
             grab_all_keys(conn);
         }
 
+        return;
+    }
+
+    if (type == XCB_GE_GENERIC && key_trace_handle_event(event)) {
         return;
     }
 
@@ -1564,6 +1570,7 @@ void handle_event(int type, xcb_generic_event_t *event) {
             break;
 
         case XCB_FOCUS_IN:
+            key_trace_reset_keys();
             handle_focus_in((xcb_focus_in_event_t *)event);
             break;
 

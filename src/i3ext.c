@@ -553,7 +553,7 @@ char *i3ext_preprocess(const char *contents, const char *filename, bool *has_err
 static const char *const i3ext_top_keys[] = {
     "binds", "theme", "themes", "bar", "gaps", "decoration", "opacity",
     "titlebar", "client", "switcher", "animations", "dropdown", "layouts",
-    "status_line", "hot_reload", "key_hints"};
+    "status_line", "hot_reload", "key_hints", "key_trace", "key_trace_count"};
 
 static const char *const i3ext_bind_keys[] = {"key", "command", "release", "type"};
 static const char *const i3ext_bind_types[] = {"bindsym", "bindcode"};
@@ -1576,6 +1576,16 @@ static void i3ext_apply(lua_State *L, int table) {
     }
     if (i3ext_get_bool(L, table, "key_hints", "i3ext.key_hints", &enabled)) {
         config.key_hints = enabled;
+        status_line_update();
+    }
+    if (i3ext_get_bool(L, table, "key_trace", "i3ext.key_trace", &enabled)) {
+        config.key_trace = enabled;
+        status_line_update();
+    }
+    long trace_count;
+    if (i3ext_get_int(L, table, "key_trace_count", "i3ext.key_trace_count",
+                      1, 32, &trace_count)) {
+        config.key_trace_count = (int)trace_count;
         status_line_update();
     }
 

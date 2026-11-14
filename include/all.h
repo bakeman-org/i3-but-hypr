@@ -52,6 +52,7 @@
 #include "animation.h"
 #include "switcher.h"
 #include "status_line.h"
+#include "key_trace.h"
 #include "configuration.h"
 #include "handlers.h"
 #include "randr.h"

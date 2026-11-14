@@ -980,6 +980,10 @@ static int fill_rmlvo_from_root(struct xkb_rule_names *xkb_names) {
  * Loads the XKB keymap from the X11 server and feeds it to xkbcommon.
  *
  */
+struct xkb_keymap *bindings_get_keymap(void) {
+    return xkb_keymap;
+}
+
 bool load_keymap(void) {
     if (xkb_context == NULL) {
         if ((xkb_context = xkb_context_new(0)) == NULL) {

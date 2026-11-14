@@ -250,6 +250,16 @@ struct Config {
      * visible here ("key_hints", i3ext only, default: off). */
     bool key_hints;
 
+    /** Whether the status line shows *all* key presses (screenkey-style),
+     * obtained from XInput2 raw events. Supersedes the "keys:" segment of
+     * key_hints because the raw stream already contains those chords
+     * ("key_trace", i3ext only, default: off). */
+    bool key_trace;
+
+    /** How many recent key labels the key_trace rolling buffer keeps
+     * ("key_trace_count", i3ext only, default: 10, range 1..32). */
+    int key_trace_count;
+
     /** Title alignment options. */
     enum {
         ALIGN_LEFT,

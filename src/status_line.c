@@ -17,8 +17,64 @@
 static char line_text[1024] = "";
 static char last_command[512] = "";
 static char last_keys[96] = "";
+static char typed_keys[512] = "";
 
 static void utf8_truncate_tail(char *str);
+
+static int typed_key_count(void) {
+    if (typed_keys[0] == '\0') {
+        return 0;
+    }
+    int count = 1;
+    for (const char *p = typed_keys; *p != '\0'; p++) {
+        if (*p == ' ') {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void trim_typed_keys(void) {
+    int limit = config.key_trace_count;
+    if (limit < 1) {
+        limit = 1;
+    }
+
+    while (typed_key_count() > limit) {
+        char *space = strchr(typed_keys, ' ');
+        if (space == NULL) {
+            typed_keys[0] = '\0';
+            break;
+        }
+        memmove(typed_keys, space + 1, strlen(space + 1) + 1);
+    }
+}
+
+void status_line_append_key(const char *label) {
+    if (!config.key_trace || label == NULL || label[0] == '\0') {
+        return;
+    }
+
+    const size_t label_len = strlen(label);
+
+    /* Keep the rolling buffer bounded: drop whole leading words until the
+     * new label fits. */
+    while (typed_keys[0] != '\0' &&
+           strlen(typed_keys) + 1 + label_len >= sizeof(typed_keys)) {
+        char *space = strchr(typed_keys, ' ');
+        if (space == NULL) {
+            typed_keys[0] = '\0';
+            break;
+        }
+        memmove(typed_keys, space + 1, strlen(space + 1) + 1);
+    }
+
+    if (typed_keys[0] != '\0') {
+        strlcat(typed_keys, " ", sizeof(typed_keys));
+    }
+    strlcat(typed_keys, label, sizeof(typed_keys));
+    status_line_update();
+}
 
 void status_line_note_key(uint32_t state_mask, const char *symbol) {
     if (!config.key_hints) {
@@ -202,17 +258,18 @@ static void build_text(char *buf, size_t len) {
     short_last[last_len] = '\0';
     utf8_truncate_tail(short_last);
 
-    if (config.key_hints && last_keys[0] != '\0') {
-        snprintf(buf, len, "[%s] %s | %s | %s%s | keys: %s | last: %s",
-                 current_binding_mode != NULL ? current_binding_mode : "default",
-                 ws_name, layout, short_title, state, last_keys,
-                 short_last[0] != '\0' ? short_last : "-");
-    } else {
-        snprintf(buf, len, "[%s] %s | %s | %s%s | last: %s",
-                 current_binding_mode != NULL ? current_binding_mode : "default",
-                 ws_name, layout, short_title, state,
-                 short_last[0] != '\0' ? short_last : "-");
+    char key_seg[560] = "";
+    if (config.key_trace && typed_keys[0] != '\0') {
+        trim_typed_keys();
+        snprintf(key_seg, sizeof(key_seg), " | typed: %s", typed_keys);
+    } else if (config.key_hints && last_keys[0] != '\0') {
+        snprintf(key_seg, sizeof(key_seg), " | keys: %s", last_keys);
     }
+
+    snprintf(buf, len, "[%s] %s | %s | %s%s%s | last: %s",
+             current_binding_mode != NULL ? current_binding_mode : "default",
+             ws_name, layout, short_title, state, key_seg,
+             short_last[0] != '\0' ? short_last : "-");
 }
 
 void status_line_update(void) {

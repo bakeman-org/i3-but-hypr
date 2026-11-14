@@ -56,7 +56,9 @@
 ```text
 hot_reload on|off        # 默认 on
 status_line on|off       # 默认 on
-key_hints on|off         # 默认 off（i3ext 专有）
+key_hints on|off         # 默认 off（i3ext 专有，仅绑定键）
+key_trace on|off         # 默认 off（i3ext 专有，所有按键）
+key_trace_count 1..32    # 默认 10（i3ext 专有，typed 缓冲区长度）
 ```
 
 推荐写法是放进 `i3ext { ... }` 块（Lua 布尔值），这样所有 fork 扩展集中在一处：
@@ -66,6 +68,8 @@ i3ext {
     hot_reload = true,
     status_line = true,
     key_hints = true,
+    key_trace = true,
+    key_trace_count = 10,
 }
 ```
 
@@ -83,8 +87,16 @@ i3ext {
 - `key_hints`：在状态行增加 `keys:` 段，显示最后一次匹配到的键位组合，
   类似 screenkey。**只能显示被 i3 抓取的按键**（即已配置的 keybinding），
   普通输入不会出现在这里。默认关闭，示例配置中开启。
+- `key_trace`：通过 **XInput2 raw key events** 追踪所有按键（包括没有被
+  i3 抓取的普通输入），在状态行显示为 `typed: h e l l o` 的滚动序列。
+  raw 事件是只读旁路，不会拦截或改变发给焦点窗口的输入。
+  `key_trace` 开启时 `typed:` 会取代 `keys:`（raw 流已经包含绑定键）。
+  只处理 KeyPress；按住不放的自动重复会被去重。默认关闭。
+- `key_trace_count`：`typed:` 缓冲区保留的最近按键数量，范围 1..32，
+  默认 10。超出后从最旧的按键开始丢弃，避免状态行被按键堆积撑爆。
 
-> 这些开关仍然是合法的原生语法（`key_hints` 除外），但 fork 扩展一律推荐写在 `i3ext {}` 中；
+> 这些开关仍然是合法的原生语法（`key_hints` / `key_trace` / `key_trace_count` 除外），
+> 但 fork 扩展一律推荐写在 `i3ext {}` 中；
 > `i3ext` 与原生指令不要混用。
 
 ---
@@ -944,11 +956,11 @@ i3ext {
   移除 `os`、`io`、`package`、`debug`、`require`、`load*`、`dofile`、`print` 等。
 - `i3 -C` 会执行并校验块内 Lua；未知字段、类型错误、范围错误都会导致校验失败。
 
-### 12.2 顶层键（共 16 个）
+### 12.2 顶层键（共 18 个）
 
 `binds`、`theme`、`themes`、`bar`、`gaps`、`decoration`、`opacity`、
 `titlebar`、`client`、`switcher`、`animations`、`dropdown`、`layouts`、
-`hot_reload`、`status_line`、`key_hints`。
+`hot_reload`、`status_line`、`key_hints`、`key_trace`、`key_trace_count`。
 
 未列出的顶层键会报 `unknown field` 并使校验失败。
 
@@ -959,6 +971,8 @@ i3ext {
 | `hot_reload` | 布尔 | — | `hot_reload` |
 | `status_line` | 布尔 | — | `status_line` |
 | `key_hints` | 布尔 | — | —（i3ext 专有） |
+| `key_trace` | 布尔 | — | —（i3ext 专有） |
+| `key_trace_count` | 整数 | 1..32 | —（i3ext 专有） |
 | `binds[]` | 表数组，键 `key`/`command`/`release`/`type` | — | `bindsym` |
 | `binds[].type` | `bindsym` / `bindcode`（**2** 项） | — | `bindsym` / `bindcode` |
 | `theme` | 主题名字符串 | — | —（仅 i3ext 主题） |
@@ -1007,9 +1021,10 @@ i3ext {
 
 固定为：
 
-`hot_reload` / `status_line` / `key_hints` → `binds` → 主题 `client` → 主题 `bar` →
-主题 `switcher` → `gaps` → `decoration` → `opacity` → `titlebar` → 顶层 `client` →
-顶层 `bar` → 顶层 `switcher` → `animations` → `dropdown` → `layouts`。
+`hot_reload` / `status_line` / `key_hints` / `key_trace` / `key_trace_count` →
+`binds` → 主题 `client` → 主题 `bar` → 主题 `switcher` → `gaps` → `decoration` →
+`opacity` → `titlebar` → 顶层 `client` → 顶层 `bar` → 顶层 `switcher` → `animations` →
+`dropdown` → `layouts`。
 
 因此顶层 `client` / `bar` / `switcher` 覆盖主题；`layouts` 最后应用。
 

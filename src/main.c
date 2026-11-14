@@ -16,6 +16,7 @@
 #include <libgen.h>
 #include <locale.h>
 #include <signal.h>
+#include <dirent.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -386,8 +387,9 @@ static void nest_isolate_session(void) {
         if (errno == EEXIST) {
             chmod(nest_runtimedir, 0700);
         } else {
-            LOG("nest mode: cannot create runtime dir %s (%s), keeping host session services\n",
+            LOG("nest mode: cannot create runtime dir %s (%s), running without a session bus\n",
                 nest_runtimedir, strerror(errno));
+            unsetenv("DBUS_SESSION_BUS_ADDRESS");
             return;
         }
     }
@@ -406,7 +408,8 @@ static void nest_isolate_session(void) {
 
     pid_t bus_pid = fork();
     if (bus_pid == -1) {
-        LOG("nest mode: fork for dbus-daemon failed, keeping host session bus\n");
+        LOG("nest mode: fork for dbus-daemon failed, running without a session bus\n");
+        unsetenv("DBUS_SESSION_BUS_ADDRESS");
         return;
     }
     if (bus_pid == 0) {
@@ -438,7 +441,11 @@ static void nest_isolate_session(void) {
             kill(bus_pid, SIGTERM);
             nest_bus_pid = 0;
         }
-        LOG("nest mode: private session bus did not start, keeping host session bus\n");
+        /* Never fall back to the host bus: with it visible, browsers and
+         * other single-instance apps can forward the command line to a host
+         * instance and the window opens outside the nest. */
+        LOG("nest mode: private session bus did not start, running without a session bus\n");
+        unsetenv("DBUS_SESSION_BUS_ADDRESS");
         return;
     }
     /* Remember the bus pid so that cleanup still works after an in-place
@@ -556,6 +563,14 @@ static void nest_enter_pid_namespace(void) {
     }
     argv[out] = NULL;
 
+    /* AppImages mount their squashfs payload through FUSE. Inside the
+     * unprivileged user namespace, /usr/bin/fusermount3 belongs to an
+     * unmapped uid (it shows up as nobody), so the runtime rejects it
+     * ("No suitable fusermount binary found on the $PATH") and browsers
+     * shipped as AppImages (Chromium, Zen, ...) silently fail to start.
+     * Let the runtime extract to a temporary directory instead. */
+    setenv("APPIMAGE_EXTRACT_AND_RUN", "1", 0);
+
     /* Marker for the inner instance (and any later in-place restarts of
      * it): never try to enter the namespace again. */
     setenv("I3_NEST_INNER", "1", 1);
@@ -565,6 +580,98 @@ static void nest_enter_pid_namespace(void) {
         strerror(errno));
     unsetenv("I3_NEST_INNER");
     FREE(argv);
+}
+
+/*
+ * Gives browsers their own profile inside the nest.
+ *
+ * Chromium (~/.config/chromium) and Firefox/Zen (~/.config/zen) keep a
+ * single-instance lock inside the profile and refuse to start a second
+ * instance on a profile that is already in use. The nest shares $HOME with the
+ * host session, so launching such a browser inside Xephyr either forwards the
+ * command line to the host instance (the window opens on the host desktop) or
+ * shows the "profile already in use" dialog instead of a browser window.
+ *
+ * Both browsers honour $XDG_CONFIG_HOME, so point it at a nest-only directory
+ * and symlink every host config entry into it except the browser profiles:
+ * the rest of the session keeps the user's configuration while browsers start
+ * with a profile of their own. Profiles are kept under
+ * ~/.cache/i3-nest/<display> so that logins survive across nest sessions;
+ * remove that directory to start from scratch.
+ *
+ */
+static void nest_isolate_browser_profiles(void) {
+    static const char *const profiles[] = {"chromium", "zen", NULL};
+    const char *home = getenv("HOME");
+    const char *display = getenv("I3_NEST_DISPLAY");
+    if (home == NULL) {
+        return;
+    }
+
+    /* An in-place `restart` keeps the environment: the redirection is already
+     * in place and re-seeding would link the nest directory into itself. */
+    if (getenv("I3_NEST_HOST_CONFIG") != NULL) {
+        return;
+    }
+
+    char hostcfg[PATH_MAX];
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    if (xdg != NULL && xdg[0] == '/') {
+        snprintf(hostcfg, sizeof(hostcfg), "%s", xdg);
+    } else {
+        snprintf(hostcfg, sizeof(hostcfg), "%s/.config", home);
+    }
+
+    DIR *dir = opendir(hostcfg);
+    if (dir == NULL) {
+        LOG("nest mode: no config dir %s, browser profiles are not isolated\n", hostcfg);
+        return;
+    }
+
+    char parent[PATH_MAX];
+    char displaydir[PATH_MAX + 32];
+    char base[PATH_MAX + 64];
+    snprintf(parent, sizeof(parent), "%s/.cache/i3-nest", home);
+    mkdir(parent, 0700);
+    snprintf(displaydir, sizeof(displaydir), "%s/%s", parent,
+             display != NULL ? display + 1 : "default");
+    mkdir(displaydir, 0700);
+    snprintf(base, sizeof(base), "%s/config", displaydir);
+    if (mkdir(base, 0700) != 0 && errno != EEXIST) {
+        LOG("nest mode: cannot create browser config dir %s (%s)\n", base, strerror(errno));
+        closedir(dir);
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        bool is_profile = false;
+        for (int i = 0; profiles[i] != NULL; i++) {
+            if (strcmp(entry->d_name, profiles[i]) == 0) {
+                is_profile = true;
+                break;
+            }
+        }
+        if (is_profile) {
+            continue;
+        }
+
+        char target[PATH_MAX + 256];
+        char linkpath[PATH_MAX + 320];
+        snprintf(target, sizeof(target), "%s/%s", hostcfg, entry->d_name);
+        snprintf(linkpath, sizeof(linkpath), "%s/%s", base, entry->d_name);
+        if (symlink(target, linkpath) != 0 && errno != EEXIST) {
+            LOG("nest mode: cannot link %s (%s)\n", linkpath, strerror(errno));
+        }
+    }
+    closedir(dir);
+
+    setenv("I3_NEST_HOST_CONFIG", hostcfg, 1);
+    setenv("XDG_CONFIG_HOME", base, 1);
+    LOG("nest mode: browser profiles isolated in %s\n", base);
 }
 
 /* Returns true if the given window is the Xephyr instance spawned by --nest.
@@ -673,13 +780,553 @@ static void nest_focus_xephyr(const char *name) {
     xcb_disconnect(host);
 }
 
-/* Spawn Xephyr, re-run ourselves on the nested display and wait for it.
- * In the child process, returns so that normal startup continues; the
- * parent process never returns. */
+/* Runs a helper and returns true if it exited successfully. Output is
+ * discarded: this is only used for best-effort host integration. */
+static bool nest_run_quiet(char *const argv[]) {
+    pid_t pid = fork();
+    if (pid == -1) {
+        return false;
+    }
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull != -1) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+        }
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int status;
+    if (waitpid(pid, &status, 0) != pid) {
+        return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+/* Checks whether the host compositor currently focuses the Xephyr window. */
+static bool nest_active_window_is(const char *name) {
+    FILE *f = popen("hyprctl activewindow 2>/dev/null", "r");
+    if (f == NULL) {
+        return false;
+    }
+    char buf[4096];
+    const size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    pclose(f);
+    return strstr(buf, name) != NULL;
+}
+
+static bool nest_focus_hyprland_once(const char *name) {
+    char title[128];
+    char klass[128];
+    snprintf(title, sizeof(title), "title:%s", name);
+    snprintf(klass, sizeof(klass), "class:%s", name);
+
+    /* Stock Hyprland. */
+    char *by_title[] = {"hyprctl", "dispatch", "focuswindow", title, NULL};
+    if (nest_run_quiet(by_title)) {
+        return nest_active_window_is(name);
+    }
+    char *by_class[] = {"hyprctl", "dispatch", "focuswindow", klass, NULL};
+    if (nest_run_quiet(by_class)) {
+        return nest_active_window_is(name);
+    }
+
+    /* Hyprland builds with the Lua dispatcher API. */
+    char lua[512];
+    snprintf(lua, sizeof(lua),
+             "local n='%s' "
+             "for _,w in ipairs(hl.get_windows()) do "
+             "if w.title==n or w.class==n then hl.dsp.focus(w) break end end "
+             "return 'ok'",
+             name);
+    char *by_lua[] = {"hyprctl", "repl", lua, NULL};
+    if (nest_run_quiet(by_lua)) {
+        usleep(100000);
+        return nest_active_window_is(name);
+    }
+    return false;
+}
+
+static bool nest_focus_sway_once(const char *name) {
+    char query[160];
+    snprintf(query, sizeof(query), "[title=\"%s\"] focus", name);
+    char *by_title[] = {"swaymsg", query, NULL};
+    if (nest_run_quiet(by_title)) {
+        return true;
+    }
+    snprintf(query, sizeof(query), "[app_id=\"%s\"] focus", name);
+    char *by_app_id[] = {"swaymsg", query, NULL};
+    return nest_run_quiet(by_app_id);
+}
+
+/* Under a Wayland compositor, XSetInputFocus() only changes the focus inside
+ * Xwayland; the compositor decides which surface receives the keyboard. Ask
+ * the host to focus the Xephyr window through its own IPC instead. */
+static char *nest_capture(const char *command, size_t *length);
+static char *nest_niri_socket(void);
+static bool nest_niri_available(void);
+static bool nest_focus_niri_once(const char *title);
+
+static void nest_focus_wayland(const char *name) {
+    if (getenv("WAYLAND_DISPLAY") == NULL) {
+        return;
+    }
+
+    const bool hyprland = getenv("HYPRLAND_INSTANCE_SIGNATURE") != NULL;
+    const bool sway = getenv("SWAYSOCK") != NULL;
+    const bool niri = !hyprland && !sway && nest_niri_available();
+    if (!hyprland && !sway && !niri) {
+        return;
+    }
+
+    for (int attempt = 0; attempt < 20; attempt++) {
+        bool focused;
+        if (hyprland) {
+            focused = nest_focus_hyprland_once(name);
+        } else if (sway) {
+            focused = nest_focus_sway_once(name);
+        } else {
+            focused = nest_focus_niri_once(name);
+        }
+        if (focused) {
+            LOG("nest mode: focused the Xephyr window via the Wayland host\n");
+            return;
+        }
+        usleep(100000);
+    }
+
+    LOG("nest mode: could not focus the Xephyr window via the Wayland host; click it manually\n");
+}
+
+/* --- Hyprland host bind suspension ---------------------------------------
+ *
+ * On Wayland the compositor consumes its global shortcuts before Xephyr sees
+ * them. While a nested i3 session is running we therefore temporarily remove
+ * the host's SUPER bindings (Hyprland's Lua API), so $mod+Return, $mod+d, etc.
+ * reach the nested instance. They are restored with `hyprctl reload` when the
+ * nest exits. SUPER+Q is kept as an emergency way to close Xephyr.
+ */
+static bool nest_host_binds_suspended = false;
+
+static char *nest_capture(const char *command, size_t *length) {
+    FILE *f = popen(command, "r");
+    if (f == NULL) {
+        return NULL;
+    }
+
+    size_t cap = 8192;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    if (buf == NULL) {
+        pclose(f);
+        return NULL;
+    }
+
+    for (;;) {
+        if (len + 4096 + 1 > cap) {
+            cap *= 2;
+            char *nb = realloc(buf, cap);
+            if (nb == NULL) {
+                free(buf);
+                pclose(f);
+                return NULL;
+            }
+            buf = nb;
+        }
+        const size_t n = fread(buf + len, 1, 4096, f);
+        len += n;
+        if (n == 0) {
+            break;
+        }
+    }
+    buf[len] = '\0';
+    pclose(f);
+    if (length != NULL) {
+        *length = len;
+    }
+    return buf;
+}
+
+/* niri (and forks such as clarion) publish their IPC socket as
+ * <name>.wayland-<n>.<pid>.sock in the runtime dir; NIRI_SOCKET may also be
+ * exported already. Returns a malloc'd path, or NULL. */
+static char *nest_niri_socket(void) {
+    const char *env = getenv("NIRI_SOCKET");
+    if (env != NULL && env[0] != '\0') {
+        return sstrdup(env);
+    }
+
+    const char *runtime = getenv("XDG_RUNTIME_DIR");
+    if (runtime == NULL) {
+        return NULL;
+    }
+    DIR *dir = opendir(runtime);
+    if (dir == NULL) {
+        return NULL;
+    }
+
+    char *found = NULL;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const size_t len = strlen(entry->d_name);
+        if (len < 6 || strcmp(entry->d_name + len - 5, ".sock") != 0) {
+            continue;
+        }
+        /* Other socket names use "-wayland-"; niri's own use ".wayland-". */
+        if (strstr(entry->d_name, ".wayland-") == NULL) {
+            continue;
+        }
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s", runtime, entry->d_name);
+        found = sstrdup(path);
+        break;
+    }
+    closedir(dir);
+    return found;
+}
+
+static bool nest_niri_available(void) {
+    char *sock = nest_niri_socket();
+    if (sock == NULL) {
+        return false;
+    }
+    free(sock);
+    return true;
+}
+
+/* Focuses the first niri window whose title starts with the given prefix. */
+static bool nest_focus_niri_once(const char *title) {
+    char *sock = nest_niri_socket();
+    if (sock == NULL) {
+        return false;
+    }
+    setenv("NIRI_SOCKET", sock, 1);
+    free(sock);
+
+    char *json = nest_capture("niri msg -j windows 2>/dev/null", NULL);
+    if (json == NULL) {
+        return false;
+    }
+
+    char needle[160];
+    snprintf(needle, sizeof(needle), "\"title\":\"%s", title);
+    char *hit = strstr(json, needle);
+    if (hit == NULL) {
+        free(json);
+        return false;
+    }
+
+    /* niri puts the window "id" before its "title". */
+    char *idfield = NULL;
+    for (char *p = json; p < hit; p++) {
+        if (strncmp(p, "\"id\":", 5) == 0) {
+            idfield = p + 5;
+        }
+    }
+    if (idfield == NULL) {
+        free(json);
+        return false;
+    }
+    const long id = strtol(idfield, NULL, 10);
+    free(json);
+    if (id <= 0) {
+        return false;
+    }
+
+    char idbuf[32];
+    snprintf(idbuf, sizeof(idbuf), "%ld", id);
+    char *argv[] = {"niri", "msg", "action", "focus-window", "--id", idbuf, NULL};
+    return nest_run_quiet(argv);
+}
+
+typedef struct {
+    int level;
+    char last_key[32];
+    char key[128];
+    char submap[64];
+    long modmask;
+    bool mouse;
+    char *lua;
+    size_t lua_len;
+    size_t lua_cap;
+    int count;
+} nest_bind_state;
+
+static bool nest_lua_reserve(nest_bind_state *state, size_t extra) {
+    if (state->lua_len + extra + 1 <= state->lua_cap) {
+        return true;
+    }
+    size_t cap = state->lua_cap ? state->lua_cap : 4096;
+    while (cap < state->lua_len + extra + 1) {
+        cap *= 2;
+    }
+    char *nb = realloc(state->lua, cap);
+    if (nb == NULL) {
+        return false;
+    }
+    state->lua = nb;
+    state->lua_cap = cap;
+    return true;
+}
+
+static void nest_lua_append_raw(nest_bind_state *state, const char *text) {
+    const size_t len = strlen(text);
+    if (!nest_lua_reserve(state, len)) {
+        return;
+    }
+    memcpy(state->lua + state->lua_len, text, len + 1);
+    state->lua_len += len;
+}
+
+static void nest_lua_unbind(nest_bind_state *state, const char *spec) {
+    char escaped[256];
+    size_t out = 0;
+    for (size_t i = 0; spec[i] != '\0' && out + 2 < sizeof(escaped); i++) {
+        if (spec[i] == '"' || spec[i] == '\\') {
+            escaped[out++] = '\\';
+        }
+        escaped[out++] = spec[i];
+    }
+    escaped[out] = '\0';
+
+    char call[320];
+    snprintf(call, sizeof(call), "pcall(hl.unbind, \"%s\"); ", escaped);
+    nest_lua_append_raw(state, call);
+}
+
+static int nest_bind_map_start(void *ctx) {
+    nest_bind_state *state = ctx;
+    if (state->level == 1) {
+        state->last_key[0] = '\0';
+        state->key[0] = '\0';
+        state->submap[0] = '\0';
+        state->modmask = 0;
+        state->mouse = false;
+    }
+    state->level++;
+    return 1;
+}
+
+static int nest_bind_map_key(void *ctx, const unsigned char *key, size_t len) {
+    nest_bind_state *state = ctx;
+    if (state->level == 2 && len < sizeof(state->last_key)) {
+        memcpy(state->last_key, key, len);
+        state->last_key[len] = '\0';
+    }
+    return 1;
+}
+
+static int nest_bind_integer(void *ctx, long long value) {
+    nest_bind_state *state = ctx;
+    if (state->level == 2 && strcmp(state->last_key, "modmask") == 0) {
+        state->modmask = (long)value;
+    }
+    return 1;
+}
+
+static int nest_bind_string(void *ctx, const unsigned char *value, size_t len) {
+    nest_bind_state *state = ctx;
+    if (state->level != 2) {
+        return 1;
+    }
+    if (strcmp(state->last_key, "key") == 0 && len < sizeof(state->key)) {
+        memcpy(state->key, value, len);
+        state->key[len] = '\0';
+    } else if (strcmp(state->last_key, "submap") == 0 && len < sizeof(state->submap)) {
+        memcpy(state->submap, value, len);
+        state->submap[len] = '\0';
+    }
+    return 1;
+}
+
+static int nest_bind_boolean(void *ctx, int value) {
+    nest_bind_state *state = ctx;
+    if (state->level == 2 && strcmp(state->last_key, "mouse") == 0) {
+        state->mouse = value != 0;
+    }
+    return 1;
+}
+
+static int nest_bind_map_end(void *ctx) {
+    nest_bind_state *state = ctx;
+    if (state->level == 2) {
+        const bool keep_q = (state->modmask == 64 && strcmp(state->key, "Q") == 0);
+        if ((state->modmask & 64) != 0 && state->submap[0] == '\0' &&
+            !state->mouse && state->key[0] != '\0' && !keep_q) {
+            char spec[192];
+            spec[0] = '\0';
+            if ((state->modmask & 64) != 0) {
+                strlcat(spec, "SUPER + ", sizeof(spec));
+            }
+            if ((state->modmask & 8) != 0) {
+                strlcat(spec, "ALT + ", sizeof(spec));
+            }
+            if ((state->modmask & 4) != 0) {
+                strlcat(spec, "CTRL + ", sizeof(spec));
+            }
+            if ((state->modmask & 1) != 0) {
+                strlcat(spec, "SHIFT + ", sizeof(spec));
+            }
+            strlcat(spec, state->key, sizeof(spec));
+            nest_lua_unbind(state, spec);
+            state->count++;
+        }
+    }
+    state->level--;
+    return 1;
+}
+
+static int nest_bind_array_start(void *ctx) {
+    ((nest_bind_state *)ctx)->level++;
+    return 1;
+}
+
+static int nest_bind_array_end(void *ctx) {
+    ((nest_bind_state *)ctx)->level--;
+    return 1;
+}
+
+static void nest_resume_hyprland_binds(void) {
+    if (!nest_host_binds_suspended) {
+        return;
+    }
+    nest_host_binds_suspended = false;
+    char *argv[] = {"hyprctl", "reload", NULL};
+    nest_run_quiet(argv);
+    LOG("nest mode: restored Hyprland bindings\n");
+}
+
+/* Restore the host bindings when the nest supervisor is interrupted. Only
+ * async-signal-safe calls here (fork/exec). */
+static void nest_resume_binds_on_signal(int sig) {
+    if (nest_host_binds_suspended) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execlp("hyprctl", "hyprctl", "reload", (char *)NULL);
+            _exit(127);
+        }
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+/* Returns true if this Hyprland build exposes the Lua dispatcher API. */
+static bool nest_hyprland_lua_available(void) {
+    size_t len = 0;
+    char *out = nest_capture("hyprctl repl 'return type(hl)' 2>/dev/null", &len);
+    const bool available = out != NULL && strstr(out, "table") != NULL;
+    free(out);
+    return available;
+}
+
+static void nest_suspend_hyprland_binds(void) {
+    if (getenv("HYPRLAND_INSTANCE_SIGNATURE") == NULL) {
+        return;
+    }
+    if (!nest_hyprland_lua_available()) {
+        LOG("nest mode: Hyprland Lua bind API unavailable; host binds not suspended\n");
+        return;
+    }
+
+    size_t len = 0;
+    char *json = nest_capture("hyprctl binds -j 2>/dev/null", &len);
+    if (json == NULL) {
+        return;
+    }
+
+    static const yajl_callbacks callbacks = {
+        .yajl_boolean = nest_bind_boolean,
+        .yajl_integer = nest_bind_integer,
+        .yajl_string = nest_bind_string,
+        .yajl_start_map = nest_bind_map_start,
+        .yajl_map_key = nest_bind_map_key,
+        .yajl_end_map = nest_bind_map_end,
+        .yajl_start_array = nest_bind_array_start,
+        .yajl_end_array = nest_bind_array_end,
+    };
+
+    nest_bind_state state = {0};
+    yajl_handle handle = yajl_alloc(&callbacks, NULL, &state);
+    const yajl_status status = yajl_parse(handle, (const unsigned char *)json, (int)len);
+    const bool parsed = (status == yajl_status_ok &&
+                         yajl_complete_parse(handle) == yajl_status_ok);
+    if (!parsed) {
+        char *error = (char *)yajl_get_error(handle, 1, (const unsigned char *)json, (int)len);
+        LOG("nest mode: could not parse `hyprctl binds -j`: %s\n", error);
+        yajl_free_error(handle, (unsigned char *)error);
+    }
+    yajl_free(handle);
+    free(json);
+
+    if (!parsed || state.lua == NULL || state.count == 0) {
+        free(state.lua);
+        LOG("nest mode: no Hyprland SUPER bindings to suspend\n");
+        return;
+    }
+
+    nest_lua_append_raw(&state, "return 'ok'");
+    char *argv[] = {"hyprctl", "repl", state.lua, NULL};
+    const bool ok = nest_run_quiet(argv);
+    free(state.lua);
+    if (!ok) {
+        LOG("nest mode: failed to suspend Hyprland bindings\n");
+        return;
+    }
+
+    nest_host_binds_suspended = true;
+    atexit(nest_resume_hyprland_binds);
+    signal(SIGINT, nest_resume_binds_on_signal);
+    signal(SIGTERM, nest_resume_binds_on_signal);
+    signal(SIGHUP, nest_resume_binds_on_signal);
+    LOG("nest mode: suspended %d Hyprland SUPER binding(s)\n", state.count);
+}
+
+/* Returns true when $DISPLAY refers to a reachable X server. */
+static bool nest_host_display_usable(void) {
+    xcb_connection_t *host = xcb_connect(NULL, NULL);
+    if (host == NULL) {
+        return false;
+    }
+    const bool ok = xcb_connection_has_error(host) == 0;
+    xcb_disconnect(host);
+    return ok;
+}
+
+/* Runs "Xwayland -help" and reports whether the binary exists and whether the
+ * given option (e.g. "-host-grab") is supported by it. */
+static bool nest_xwayland_probe(const char *option) {
+    FILE *help = popen("Xwayland -help 2>&1", "r");
+    if (help == NULL) {
+        return false;
+    }
+    bool found = option == NULL;
+    char line[512];
+    while (fgets(line, sizeof(line), help) != NULL) {
+        if (option != NULL && strstr(line, option) != NULL) {
+            found = true;
+        }
+    }
+    pclose(help);
+    return found;
+}
+
+/* Spawn the nested X server, re-run ourselves on the nested display and wait
+ * for it. In the child process, returns so that normal startup continues; the
+ * parent process never returns.
+ *
+ * With a reachable host X display, Xephyr is used: the nested session lives in
+ * a normal X window. Wayland hosts without an X display (niri, or compositors
+ * that never start Xwayland) get a rootful Xwayland instead, which is itself a
+ * Wayland client showing the whole nested screen in one window. */
 static void nest_run(void) {
     char sockfile[64];
     char disparg[16];
     char nest_name[32];
+    /* The child unsets WAYLAND_DISPLAY for programs it starts, so remember
+     * whether the host session is Wayland before forking. */
+    const bool host_wayland = getenv("WAYLAND_DISPLAY") != NULL;
+    const bool use_xwayland = !nest_host_display_usable();
 
     if (!nest_display_explicit) {
         nest_display = nest_find_free_display();
@@ -695,6 +1342,18 @@ static void nest_run(void) {
         errx(EXIT_FAILURE, "nest mode: display :%d is already in use (pass --nest=N to choose another display)",
              nest_display);
     }
+
+    if (use_xwayland) {
+        if (!host_wayland) {
+            errx(EXIT_FAILURE,
+                 "nest mode: no usable host display: DISPLAY is not set and this is not a Wayland session");
+        }
+        if (!nest_xwayland_probe(NULL)) {
+            errx(EXIT_FAILURE,
+                 "nest mode: no usable host display: DISPLAY is not set and Xwayland is not installed");
+        }
+    }
+    const bool xwayland_host_grab = use_xwayland && nest_xwayland_probe("-host-grab");
 
     nest_ensure_system_libs();
 
@@ -716,6 +1375,11 @@ static void nest_run(void) {
         unsetenv("WAYLAND_DISPLAY");
         unsetenv("WAYLAND_SOCKET");
         setenv("XDG_SESSION_TYPE", "x11", 1);
+        /* The nested session is X11-only: pin GTK to its X11 backend. Host
+         * sessions often export GDK_BACKEND=wayland; inheriting it makes GTK
+         * try Wayland, fail, and give up ("Failed to open display") instead of
+         * falling back to X11. */
+        setenv("GDK_BACKEND", "x11", 1);
         /* Drop the host i3's IPC socket path so that this instance gets its
          * own socket, otherwise it refuses to start with "Socket is already
          * in use". */
@@ -728,45 +1392,114 @@ static void nest_run(void) {
             usleep(100000);
         }
         if (access(sockfile, F_OK) != 0) {
-            errx(EXIT_FAILURE, "nest mode: Xephyr did not start on :%d", nest_display);
+            errx(EXIT_FAILURE, "nest mode: nested X server did not start on :%d", nest_display);
         }
         LOG("nest mode: running on :%d\n", nest_display);
-        fprintf(stderr,
-                "nest mode: the keyboard is captured by Xephyr while its window has the focus.\n"
-                "nest mode: press Ctrl+Shift to release it to the host, press again to re-grab.\n"
-                "nest mode: a Wayland host compositor may still consume its own global shortcuts.\n");
+        if (use_xwayland) {
+            fprintf(stderr,
+                    "nest mode: no host X display found, so the nested session runs in a rootful\n"
+                    "nest mode: Xwayland window of the host compositor. Click that window if the\n"
+                    "nest mode: compositor did not give it the keyboard focus.\n");
+        } else {
+            fprintf(stderr,
+                    "nest mode: the keyboard is captured by Xephyr while its window has the focus.\n"
+                    "nest mode: press Ctrl+Shift to release it to the host, press again to re-grab.\n"
+                    "nest mode: a Wayland host compositor may still consume its own global shortcuts.\n");
+        }
+        if (host_wayland) {
+            if (getenv("HYPRLAND_INSTANCE_SIGNATURE") != NULL) {
+                fprintf(stderr,
+                        "nest mode: Hyprland detected: SUPER bindings are suspended while the nest\n"
+                        "nest mode: runs and restored on exit.\n");
+            } else if (xwayland_host_grab) {
+                fprintf(stderr,
+                        "nest mode: the compositor's global shortcuts are inhibited while the\n"
+                        "nest mode: Xwayland window has the keyboard focus.\n");
+            } else {
+                fprintf(stderr,
+                        "nest mode: the compositor owns global shortcuts; disable the conflicting\n"
+                        "nest mode: ones while testing.\n");
+            }
+        }
         /* Process isolation: keep killall/pkill/ps inside the nest from
          * seeing (and killing) host processes. */
+        setenv("I3_NEST_DISPLAY", disparg, 1);
         nest_enter_pid_namespace();
         return;
     }
 
-    pid_t xephyr_pid = fork();
-    if (xephyr_pid == -1) {
+    pid_t server_pid = fork();
+    if (server_pid == -1) {
         err(EXIT_FAILURE, "fork");
     }
-    if (xephyr_pid == 0) {
-        /* Windowed instead of fullscreen: otherwise it is hard to tell the
-         * nested instance apart from the real session. -name identifies the
-         * window for nest_focus_xephyr(). */
-        execlp("Xephyr", "Xephyr", disparg, "-ac", "-br",
-               "-name", nest_name, "-title", nest_name,
-               "-screen", "1280x800", (char *)NULL);
+    if (server_pid == 0) {
+        if (use_xwayland) {
+            /* Rootful Xwayland shows the whole nested screen in one Wayland
+             * window. -host-grab additionally asks the compositor to stop
+             * consuming its global shortcuts while that window is focused
+             * (requires the keyboard-shortcuts-inhibit protocol). */
+            if (xwayland_host_grab) {
+                execlp("Xwayland", "Xwayland", disparg, "-geometry", "1280x800",
+                       "-ac", "-br", "-noreset", "-host-grab", (char *)NULL);
+            } else {
+                execlp("Xwayland", "Xwayland", disparg, "-geometry", "1280x800",
+                       "-ac", "-br", "-noreset", (char *)NULL);
+            }
+        } else {
+            /* Windowed instead of fullscreen: otherwise it is hard to tell the
+             * nested instance apart from the real session. -name identifies the
+             * window for nest_focus_xephyr(). */
+            execlp("Xephyr", "Xephyr", disparg, "-ac", "-br",
+                   "-name", nest_name, "-title", nest_name,
+                   "-screen", "1280x800", (char *)NULL);
+        }
         _exit(127);
     }
 
-    LOG("nest mode: Xephyr on :%d (pid %d), nested i3 (pid %d)\n",
-        nest_display, xephyr_pid, i3_pid);
+    LOG("nest mode: %s on :%d (pid %d), nested i3 (pid %d)\n",
+        use_xwayland ? "rootful Xwayland" : "Xephyr", nest_display, server_pid, i3_pid);
 
-    /* Hand the keyboard to Xephyr so that $mod bindings and Alt+Tab are handled
-     * by the nested instance only, not by the host as well. */
-    nest_focus_xephyr(nest_name);
+    if (use_xwayland && nest_niri_available()) {
+        /* Rootful Xwayland is just another window of the host compositor: if it
+         * does not have the keyboard focus, every key (including the host's own
+         * global shortcuts) goes to whatever else is focused and the session
+         * looks like it "leaks" onto the host desktop. Focus it through niri's
+         * IPC (niri and forks such as clarion). */
+        char xtitle[64];
+        snprintf(xtitle, sizeof(xtitle), "Xwayland on %s", disparg);
+        for (int attempt = 0; attempt < 40; attempt++) {
+            if (nest_focus_niri_once(xtitle)) {
+                LOG("nest mode: focused the rootful Xwayland window\n");
+                break;
+            }
+            usleep(100000);
+        }
+    }
+
+    if (!use_xwayland) {
+        /* Hand the keyboard to Xephyr so that $mod bindings and Alt+Tab are
+         * handled by the nested instance only, not by the host as well. */
+        nest_focus_xephyr(nest_name);
+        /* XSetInputFocus() does not move the compositor-level focus on Wayland. */
+        nest_focus_wayland(nest_name);
+    }
+    /* Typos in the nested config must not be "eaten" by the host WM. */
+    nest_suspend_hyprland_binds();
+    if (nest_host_binds_suspended) {
+        fprintf(stderr,
+                "nest mode: Hyprland SUPER bindings suspended; they are restored when the nest exits.\n");
+    } else if (host_wayland && !(use_xwayland && xwayland_host_grab)) {
+        fprintf(stderr,
+                "nest mode: could not suspend host bindings automatically; disable conflicting\n"
+                "nest mode: SUPER shortcuts in your compositor while testing.\n");
+    }
 
     int status;
     waitpid(i3_pid, &status, 0);
-    kill(xephyr_pid, SIGTERM);
+    kill(server_pid, SIGTERM);
     int xstatus;
-    waitpid(xephyr_pid, &xstatus, 0);
+    waitpid(server_pid, &xstatus, 0);
+    nest_resume_hyprland_binds();
 
     if (WIFEXITED(status)) {
         exit(WEXITSTATUS(status));
@@ -835,6 +1568,12 @@ int main(int argc, char *argv[]) {
     /* Init logging *before* initializing debug_build to guarantee early
      * (file) logging. */
     init_logging();
+
+    /* Running as the inner instance of --nest (private PID/mount namespace):
+     * keep host browser profiles out of the nested session. */
+    if (getenv("I3_NEST_INNER") != NULL) {
+        nest_isolate_browser_profiles();
+    }
 
     /* On release builds, disable SHM logging by default. */
     shmlog_size = (is_debug_build() || strstr(argv[0], "i3-with-shmlog") != NULL ? default_shmlog_size : 0);
@@ -1449,6 +2188,10 @@ int main(int argc, char *argv[]) {
     if (!load_keymap()) {
         die("Could not load keymap\n");
     }
+
+    /* Raw key tracking for the i3bar status line (XInput2, does not consume
+     * events). Must run after the xkb keymap is available. */
+    key_trace_init();
 
     translate_keysyms();
     grab_all_keys(conn);

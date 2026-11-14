@@ -453,10 +453,28 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
   `xcb_set_input_focus` 把焦点交给它，并把指针挪到窗口中心（兼容
   `focus_follows_mouse`），无需用户先点一下窗口。窗口用
   `-name i3-nest-<display>` 标记（WM_CLASS），多开时不会认错窗口。
+- **Wayland 宿主（Hyprland/Sway）焦点**：Wayland 下 `xcb_set_input_focus()`
+  只改变 Xwayland 内部焦点，compositor 仍决定哪个 surface 收到键盘。nest 会
+  检测 `HYPRLAND_INSTANCE_SIGNATURE` / `SWAYSOCK`，通过
+  `hyprctl dispatch focuswindow`（兼容 Lua dispatcher 构建的
+  `hyprctl repl` + `hl.dsp.focus(w)`）或 `swaymsg [title="..."] focus`
+  把 compositor 级焦点切到 Xephyr 窗口，解决“Ctrl+Shift 没反应”的问题。
+- **宿主全局快捷键自动让位（Hyprland）**：Wayland compositor 会在事件到达
+  Xwayland 之前消费自己的全局绑定（例如 Hyprland 默认的 `SUPER+Return`）。
+  nest 在 Hyprland 下会通过 `hyprctl binds -j` 枚举宿主绑定，用 Lua API
+  `hl.unbind()` 临时移除所有 `SUPER` 组合（鼠标拖动/缩放绑定不受影响；
+  若宿主配置了 `SUPER+Q` 则保留为关闭 Xephyr 的应急出口），退出（包括
+  SIGINT/SIGTERM）时执行 `hyprctl reload` 全部恢复。这样 `$mod+Return`、
+  `$mod+d` 等按键会真正进入嵌套 i3。其他 compositor 仍需手动解绑或使用
+  专用 Xorg 会话。
 - **静态与隔离**：嵌套会话有独立的 display、独立 `XDG_RUNTIME_DIR`、独立
   dbus-daemon；`unset WAYLAND_DISPLAY`/`WAYLAND_SOCKET` 并设
   `XDG_SESSION_TYPE=x11`，客户端不会跑回宿主 Wayland 桌面。Linux 下 Xephyr
   默认抓取键盘，`Ctrl+Shift` 切换抓取/释放，启动时在 stderr 说明。
+  **私有 dbus 起不来时不再回退宿主总线**（直接清空
+  `DBUS_SESSION_BUS_ADDRESS`）：否则浏览器/单实例应用可以经宿主总线把命令行
+  转发给宿主实例，窗口就跑到宿主桌面了。代价是该次 nest 内没有
+  portal/输入法等 DBus 服务，这是为“严格隔离”做的取舍。
 - **进程级隔离（PID namespace）**：嵌套实例经
   `unshare --user --map-current-user --pid --fork --mount-proc` 重执行（
   `nest_enter_pid_namespace()`），拥有私有 `/proc`——嵌套会话里的
@@ -471,9 +489,51 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
   `--nest*`，附带修复了 nest 内就地 restart 会重入 `nest_run()` 而失败
   的问题。unshare 缺失或非特权 user namespace 被禁用（sysctl/AppArmor）
   时自动降级为无 namespace 运行（探测子进程静默失败后打日志）。
+- **AppImage 可正常启动**：user namespace 里 `/usr/bin/fusermount3` 的属主
+  是不可映射的 uid（显示为 nobody），AppImage runtime 会判定
+  `No suitable fusermount binary found on the $PATH` 而拒绝启动——Chromium、
+  Zen 这类以 AppImage 分发的浏览器因此在 nest 内“点了没反应”。进入 PID
+  namespace 前会设置 `APPIMAGE_EXTRACT_AND_RUN=1`（用户已显式设置时保留），
+  让 runtime 解包到临时目录运行，无需 FUSE。
+- **浏览器独立 profile**：Chromium/Zen 的 profile 锁与宿主共用（同一个
+  `$HOME`），宿主已有实例时 nest 内启动会转发到宿主（窗口跑到宿主桌面）或
+  弹出 “profile already in use”。inner i3 启动时把 `XDG_CONFIG_HOME` 指向
+  `~/.cache/i3-nest/<display>/config`（两家浏览器都认这个变量），并把宿主
+  `~/.config/*` 逐项软链进去、只为 `chromium` / `zen` 保留独立目录：其余程序
+  仍用宿主配置，浏览器用 nest 自己的 profile（跨会话保留，删掉该目录即重置）。
+  就地 `restart` 通过 `I3_NEST_HOST_CONFIG` 记忆原始路径，避免重复软链。
+  限制：上游 Firefox 本体把 profile 放在 `~/.mozilla`（不读
+  `XDG_CONFIG_HOME`），宿主实例在跑时仍会冲突；Chromium / Zen 不受影响。
+- **无宿主 X 显示时改用 rootful Xwayland**：niri / clarion 这类不跑
+  Xwayland（或只跑 rootless Xwayland）的 Wayland 会话里 `DISPLAY` 通常为空，
+  Xephyr 会报 `Xephyr cannot open host display. Is DISPLAY set?` 直接退出。
+  nest 现在会先探测 `DISPLAY` 是否可连接；连不上就在嵌套 display 上启动
+  **rootful Xwayland**（`Xwayland :N -geometry 1280x800 -ac -br -noreset`，
+  版本支持时追加 `-host-grab`）代替 Xephyr：整个嵌套屏幕成为宿主合成器里的
+  一个普通窗口，尺寸随其平铺/缩放变化（例如 niri 风格的列）。`-host-grab`
+  会在该窗口获得焦点时请求合成器暂停全局快捷键（需要
+  keyboard-shortcuts-inhibit 协议），不支持时退回“手动避开宿主快捷键”的提示。
+  宿主有可用 X 显示时仍走原来的 Xephyr 路径，行为不变。
+  另外无论走哪条路径，嵌套会话都会把 `GDK_BACKEND` 固定为 `x11`：宿主会话
+  常导出 `GDK_BACKEND=wayland`，若原样继承，GTK 会先连 Wayland（嵌套里没有
+  socket）然后直接放弃，报 `Failed to open display`，连
+  `xdg-desktop-portal-gtk` 都起不来。
+- **rootful Xwayland 窗口自动聚焦（niri / clarion）**：Xwayland 窗口只是宿主
+  里的一个普通窗口，**没拿到键盘焦点时按键会全部落到宿主**，于是“在 nest 里
+  按 `Mod+D`”实际触发的是宿主合成器的 rofi，从中启动的浏览器就出现在宿主
+  桌面（这是“应用穿透到真机”的最常见原因）。`-host-grab` 的抑制也只在窗口
+  有焦点时生效（窗口标题会在 `grabs` / `releases` 之间切换，可据此判断）。
+  nest 现在会通过 niri IPC（`NIRI_SOCKET`，或运行时目录里的
+  `<name>.wayland-<n>.<pid>.sock`，niri 的 fork 同样适用）用
+  `niri msg -j windows` 找到标题以 `Xwayland on :N` 开头的窗口，再
+  `niri msg action focus-window --id <id>` 把焦点交给它；Xephyr 路径在
+  niri/clarion 下也会用同样的方式聚焦。
 - **已知限制**：宿主若是 Wayland compositor，其 compositor 层的全局快捷键
-  在 XWayland 之前处理，Xephyr 抓取无法拦截；这一点无法从 i3 一侧解决。
-- 退出时自动清理 Xephyr 并透传退出码；启动前规避本机有缺陷的
+  在 XWayland 之前处理；Xephyr 路径无法拦截，rootful Xwayland + `-host-grab`
+  时且**窗口有焦点**时才可抑制。若合成器不实现
+  keyboard-shortcuts-inhibit，与宿主同键的绑定（如 clarion 的 `Mod+D` 与 i3
+  的 `$mod+d`）仍会被宿主先吃掉，只能改宿主键位或换键测试。
+- 退出时自动清理嵌套 X 服务器（Xephyr / rootful Xwayland）并透传退出码；启动前规避本机有缺陷的
   `/usr/local` libxkbcommon（re-exec 前置 `/usr/lib/x86_64-linux-gnu`）。
 
 ### 3. 视觉默认值（`src/config.c`）
@@ -517,6 +577,12 @@ Hyprland 风格：保存配置文件即自动生效，无需手动 `$mod+Shift+c
 - `key_hints`（默认 off）：在 `key_press.c` 里把匹配到的 Binding 的
   `event_state_mask` + `symbol` 格式化成 `Mod4+Shift+r`，类似 screenkey。
   由于 i3 只接收被 grab 的按键，这里只显示已配置的 keybinding；
+- `key_trace`（默认 off）：在 `key_trace.c` 里通过 **XInput2 raw key events**
+  旁路监听所有按键（不 grab、不消费、不影响焦点应用），用私有 xkb state
+  解析修饰键和 keysym，滚动显示为 `typed: h e l l o`。
+  开启后 `typed:` 取代 `keys:`；自动重复按键会被去重；
+  键盘布局变化（XKB map notify）时重建私有 state；
+  `key_trace_count`（1..32，默认 10）控制滚动缓冲区保留多少个最近按键；
 - 每个 `tree_render()` 结束后刷新，并在 `parse_command()` 后立即刷新，
   保证 `nop`、mode 切换这类不触发渲染的动作也能看到；
 - 文字不变时不重复发送 IPC；

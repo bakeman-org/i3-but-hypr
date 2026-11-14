@@ -57,6 +57,13 @@ Binding *get_binding_from_xcb_event(xcb_generic_event_t *event);
 void translate_keysyms(void);
 
 /**
+ * Returns the current xkb keymap (owned by i3, do not unref). Used by the
+ * key tracer to translate raw keycodes.
+ *
+ */
+struct xkb_keymap *bindings_get_keymap(void);
+
+/**
  * Switches the key bindings to the given mode, if the mode exists
  *
  */

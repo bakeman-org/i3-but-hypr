@@ -203,6 +203,7 @@ xcb_util_cursor_dep = dependency('xcb-cursor', method: 'pkg-config')
 xcb_util_keysyms_dep = dependency('xcb-keysyms', method: 'pkg-config')
 xcb_util_wm_dep = dependency('xcb-icccm', method: 'pkg-config')
 xcb_util_xrm_dep = dependency('xcb-xrm', method: 'pkg-config')
+xcb_xinput_dep = cc.find_library('xcb-xinput', required: true)
 xkbcommon_dep = dependency('xkbcommon', method: 'pkg-config')
 xkbcommon_x11_dep = dependency('xkbcommon-x11', method: 'pkg-config')
 yajl_dep = dependency('yajl', method: 'pkg-config')
@@ -275,6 +276,7 @@ i3srcs = [
   'src/animation.c',
   'src/switcher.c',
   'src/status_line.c',
+  'src/key_trace.c',
   'src/assignments.c',
   'src/bindings.c',
   'src/click.c',
@@ -376,6 +378,7 @@ common_deps = [
   xcb_util_keysyms_dep,
   xcb_util_wm_dep,
   xcb_util_xrm_dep,
+  xcb_xinput_dep,
   xkbcommon_dep,
   xkbcommon_x11_dep,
   yajl_dep,
