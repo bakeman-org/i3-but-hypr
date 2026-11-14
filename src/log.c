@@ -37,6 +37,13 @@ static bool verbose = false;
 static FILE *errorfile;
 char *errorfilename;
 
+/* When set, *LOG() only writes to the error log file (see log_set_silent()). */
+static bool log_silent;
+
+void log_set_silent(bool silent) {
+    log_silent = silent;
+}
+
 /* SHM logging variables */
 
 /* The name for the SHM (/i3-log-%pid). Will end up on /dev/shm on most
@@ -238,6 +245,7 @@ __attribute__((format(printf, 2, 0))) static void vlog(const bool print, const c
     static struct tm *tmp;
     static size_t len;
 
+    /* Set by `i3 -C`: only write to the error log file, not to the terminal. */
     /* Get current time */
     t = time(NULL);
     /* Convert time to local time (determined by the locale) */
@@ -257,11 +265,17 @@ __attribute__((format(printf, 2, 0))) static void vlog(const bool print, const c
 #ifdef DEBUG_TIMING
         struct timeval tv;
         gettimeofday(&tv, NULL);
-        printf("%s%d.%d - ", message, tv.tv_sec, tv.tv_usec);
+        if (!log_silent) {
+            printf("%s%d.%d - ", message, tv.tv_sec, tv.tv_usec);
+        }
 #else
-        printf("%s", message);
+        if (!log_silent) {
+            printf("%s", message);
+        }
 #endif
-        vprintf(fmt, args);
+        if (!log_silent) {
+            vprintf(fmt, args);
+        }
     } else {
         len += vsnprintf(message + len, sizeof(message) - len, fmt, args);
         if (len >= sizeof(message)) {
@@ -293,7 +307,7 @@ __attribute__((format(printf, 2, 0))) static void vlog(const bool print, const c
 
         store_log_markers();
 
-        if (print) {
+        if (print && !log_silent) {
             fwrite(message, len, 1, stdout);
         }
 

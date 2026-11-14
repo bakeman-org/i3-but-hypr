@@ -1739,6 +1739,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (only_check_config) {
+        /* load_configuration() prints a detailed report; keep the raw log lines
+         * out of the terminal (they still end up in the error log file). */
+        log_set_silent(true);
         exit(load_configuration(override_configpath, C_VALIDATE) ? EXIT_SUCCESS : EXIT_FAILURE);
     }
 

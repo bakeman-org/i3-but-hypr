@@ -284,6 +284,7 @@ i3srcs = [
   'src/commands_parser.c',
   'src/con.c',
   'src/config.c',
+  'src/config_diag.c',
   'src/config_directives.c',
   'src/config_parser.c',
   'src/config_watcher.c',
@@ -562,6 +563,7 @@ executable(
   'test.config_parser',
   [
     'src/config_parser.c',
+    'src/config_diag.c',
     'src/parser_util.c',
     config_parser,
   ],

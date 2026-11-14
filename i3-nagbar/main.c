@@ -513,8 +513,23 @@ int main(int argc, char *argv[]) {
     font = load_font(pattern, true);
     set_font(&font);
 
+    /* Size the bar to the message so that long diagnostics stay readable, but
+     * never make it wider than the screen. */
+    int width = predict_text_width(prompt) + 2 * MSG_PADDING;
+    width += predict_text_width(btn_close.label) + 2 * BTN_PADDING + 2 * BTN_BORDER + CLOSE_BTN_GAP;
+    for (int i = 0; i < buttoncnt; i++) {
+        width += predict_text_width(buttons[i].label) + 2 * BTN_PADDING + 2 * BTN_BORDER + BTN_GAP;
+    }
+    const int max_width = root_screen->width_in_pixels - 2 * 50;
+    if (width > max_width) {
+        width = max_width;
+    }
+    if (width < 500) {
+        width = 500;
+    }
+
     /* Default values if we cannot determine the preferred window position. */
-    xcb_rectangle_t win_pos = (xcb_rectangle_t){50, 50, 500, font.height + 2 * MSG_PADDING + BAR_BORDER};
+    xcb_rectangle_t win_pos = (xcb_rectangle_t){50, 50, width, font.height + 2 * MSG_PADDING + BAR_BORDER};
     if (position_on_primary) {
         set_window_position_primary(&win_pos);
     } else {

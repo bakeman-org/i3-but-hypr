@@ -99,6 +99,52 @@ i3ext {
 > 但 fork 扩展一律推荐写在 `i3ext {}` 中；
 > `i3ext` 与原生指令不要混用。
 
+### 1.4 配置检查命令行（CLI）`[扩展]`
+
+配置出错时除了 i3-nagbar 的提示，还可以直接用 i3 二进制做一次完整检查：
+
+```bash
+i3 -C                        # 检查当前会话使用的配置
+i3 -C -c ~/.config/i3/config # 检查指定文件
+```
+
+退出码：`0` = 通过，`1` = 有错误（可用于 CI / 提交前检查）。
+
+输出（stderr）结构：
+
+```text
+i3: 配置错误: config:38: 无法识别这一行的开头（不是合法的 i3 指令，或拼写有误）
+
+发现 1 个配置错误（下面的行号与竖线指示具体位置）：
+
+[1/1] /home/you/.config/i3/config:38
+      36 | bar {
+      37 |     font pango:DejaVu Sans Mono 12
+   >  38 |     float_size = { width = 0.6, height = 0.6 },
+      39 | }
+      原因: 无法识别这一行的开头（不是合法的 i3 指令，或拼写有误）
+      建议: 这一行是 Lua 赋值写法。fork 扩展字段（float_size、status_line、
+            hot_reload、theme、binds、gaps、layouts、animations、dropdown 等）
+            必须写在顶层 `i3ext { ... }` 块内……
+
+下一步：
+  1. 按上面的文件:行号修改配置（编辑器里跳转即可）。
+  2. 重新检查：i3 -C -c /home/you/.config/i3/config
+  3. 修好后保存文件（开启了 hot_reload 会自动重载），或执行 i3-msg reload。
+  4. 完整语法见 docs/config-spec.zh.md；fork 扩展见第 12 章 i3ext。
+```
+
+检查项来源：
+
+- **上游语法错误**：未知指令、括号不匹配、参数缺失等，由配置解析器报告；
+- **i3ext（Lua）错误**：未知字段、类型/范围/枚举/颜色格式错误、Lua 语法错误，
+  行号会尽量定位到**出错的那一行字段**（而不是块首）；
+- 修复建议按错误类型生成（Lua 字段写在块外、缩进、未知字段、越界、类型不符等）。
+
+`i3 -C` 运行时不会把原始日志刷到终端（仍写入 error log，供 nagbar 的
+“show errors” 查看）。图形界面方面：i3-nagbar 现在使用等宽字体 13px、宽度随
+消息自适应，并在消息里带上 `文件:行号: 首条错误`；自动热重载失败时同样如此。
+
 ---
 
 ## 二、指令总览

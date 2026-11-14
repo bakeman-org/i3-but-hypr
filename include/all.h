@@ -79,6 +79,7 @@
 #include "bindings.h"
 #include "config_directives.h"
 #include "config_parser.h"
+#include "config_diag.h"
 #include "i3ext.h"
 #include "config_watcher.h"
 #include "fake_outputs.h"

@@ -54,6 +54,17 @@ Hyprland 风格动画，几何插值完全独立于布局代码：
 - `hot_reload on|off`（默认 on）：自动监视主配置及 `include` 的文件，改动后
   0.2s 防抖、先子进程校验再应用（见 `src/config_watcher.c`）。默认开启时可以
   不再绑定 `$mod+Shift+c reload`；`restart` 仍用于换二进制等场景。
+- **配置诊断（`src/config_diag.c`）**：解析器与 i3ext 的每个错误都会记录
+  `文件:行号 / 原因 / 建议`。
+  - `i3 -C [-c 文件]` 变成真正的 CLI 检查器：退出码 0/1，输出源码上下文
+    （前后各一行、`>` 标记出错行）、可读原因、按错误类型生成的修复建议，
+    以及“下一步”指引；默认不再把原始日志刷到终端（仍写入 error log）。
+  - i3ext（Lua）错误会尽量定位到**具体字段行**：Lua 表不保存位置，C 校验函数
+    报错只能指到 `i3ext {` 那一行，因此按错误里的字段名在块源码中反查
+    `key = ...`（唯一命中时采用该行）。
+  - i3-nagbar 使用等宽字体 13px、宽度按消息自适应（此前固定 500px 会被截断），
+    消息里直接显示 `文件:行号: 首条错误`；自动热重载失败时 watcher 会捕获
+    `i3 -C` 的输出，把同样的定位信息显示在 nagbar 上。
 - `cyclenext` / `cycleprev`：循环聚焦。
 - `zoom`、`swapdir`：主区交换/方向交换。
 - `layoutmsg <msg>`：`togglesplit`、`proportion ±delta`、`setproportion <x>`

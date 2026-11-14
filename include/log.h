@@ -35,6 +35,14 @@ extern int shmlog_size;
 extern char *current_log_stream_socket_path;
 
 /**
+ * When set, *LOG() only writes to the error log file and no longer prints to
+ * stdout. Used by `i3 -C` so that the detailed configuration report is the
+ * only thing on the terminal.
+ *
+ */
+void log_set_silent(bool silent);
+
+/**
  * Initializes logging by creating an error logfile in /tmp (or
  * XDG_RUNTIME_DIR, see get_process_filename()).
  *

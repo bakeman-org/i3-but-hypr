@@ -1953,6 +1953,104 @@ static int i3ext_traceback(lua_State *L) {
     return 1;
 }
 
+/* Errors raised from the C validation helpers point at the "i3ext {...}"
+ * statement, not at the offending field (Lua tables do not carry positions).
+ * Recover the line by searching the block source for a unique
+ * "<leaf key> = ..." assignment. Returns the padded line number (which equals
+ * the physical line in the configuration file). */
+static int i3ext_refine_error_line(const struct i3ext_chunk *chunk, const char *message) {
+    if (strncmp(message, "i3ext.", strlen("i3ext.")) != 0) {
+        return chunk->start_line;
+    }
+    const char *path_end = strchr(message, ':');
+    if (path_end == NULL) {
+        return chunk->start_line;
+    }
+    const char *leaf = message;
+    for (const char *p = message; p < path_end; p++) {
+        if (*p == '.') {
+            leaf = p + 1;
+        }
+    }
+    const size_t leaf_len = (size_t)(path_end - leaf);
+    if (leaf_len == 0 || leaf_len >= 64) {
+        return chunk->start_line;
+    }
+
+    int found_line = 0;
+    int found_count = 0;
+    const char *src = chunk->source;
+    int line = 1;
+    while (*src != '\0') {
+        const char *eol = strchr(src, '\n');
+        const size_t len = (eol != NULL ? (size_t)(eol - src) : strlen(src));
+        for (const char *p = src; p + leaf_len <= src + len; p++) {
+            if (strncmp(p, leaf, leaf_len) != 0) {
+                continue;
+            }
+            const char *q = p + leaf_len;
+            while (q < src + len && (*q == ' ' || *q == '\t')) {
+                q++;
+            }
+            if (q < src + len && *q == '=') {
+                found_line = line;
+                found_count++;
+                break;
+            }
+        }
+        if (eol == NULL) {
+            break;
+        }
+        src = eol + 1;
+        line++;
+    }
+
+    return (found_count == 1 ? found_line : chunk->start_line);
+}
+
+/* Records a Lua/i3ext error for the diagnostics report. Lua errors look like
+ * "/path/to/config:38: i3ext.float_size.width: value ... out of range ...",
+ * because the chunk is loaded with the real file name and padded line
+ * numbers. */
+static void i3ext_record_error(const struct i3ext_chunk *chunk, const char *error) {
+    if (error == NULL) {
+        config_diag_add(NULL, 0, "(unknown Lua error)", NULL);
+        return;
+    }
+
+    char *copy = sstrdup(error);
+    char *newline = strchr(copy, '\n');
+    if (newline != NULL) {
+        *newline = '\0';
+    }
+
+    char *message = copy;
+    int line = 0;
+    for (char *p = copy; *p != '\0'; p++) {
+        if (*p != ':' || !isdigit((unsigned char)p[1])) {
+            continue;
+        }
+        char *digits = p + 1;
+        while (isdigit((unsigned char)*digits)) {
+            digits++;
+        }
+        if (*digits == ':' && digits[1] == ' ') {
+            *p = '\0';
+            line = atoi(p + 1);
+            message = digits + 2;
+            break;
+        }
+    }
+
+    if (line > 0) {
+        line = i3ext_refine_error_line(chunk, message);
+    }
+
+    config_diag_add(line > 0 ? copy : NULL, line, message,
+                    config_diag_hint_i3ext(message));
+    free(copy);
+}
+
 bool i3ext_run(long index) {
     struct i3ext_chunk *chunk = NULL;
     for (struct i3ext_chunk *c = i3ext_chunks; c != NULL; c = c->next) {
@@ -2020,6 +2118,7 @@ bool i3ext_run(long index) {
                          chunkname, "t") != LUA_OK) {
         const char *error = lua_tostring(L, -1);
         ELOG("i3ext: %s\n", error ? error : "(unknown Lua error)");
+        i3ext_record_error(chunk, error);
         lua_close(L);
         return false;
     }
@@ -2034,6 +2133,7 @@ bool i3ext_run(long index) {
     if (lua_pcall(L, 0, 0, msgh) != LUA_OK) {
         const char *error = lua_tostring(L, -1);
         ELOG("i3ext: %s\n", error ? error : "(unknown Lua error)");
+        i3ext_record_error(chunk, error);
         lua_close(L);
         return false;
     }

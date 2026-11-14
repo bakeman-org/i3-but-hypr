@@ -17,6 +17,7 @@
 #include <libgen.h>
 #include <sys/inotify.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 /*
  * Time between the last observed change and the actual reload. Editors
@@ -133,20 +134,74 @@ void config_watcher_rearm(void) {
  * -C. This must happen out of process: a failed parse would otherwise
  * leave the live Config struct partially overwritten.
  *
+ * On failure, *detail (when non-NULL) receives a malloc'd one-line summary of
+ * the first problem, taken from the report that `i3 -C` prints.
+ *
  */
-static bool validate_current_config(void) {
+static bool validate_current_config(char **detail) {
+    if (detail != NULL) {
+        *detail = NULL;
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        ELOG("pipe() failed: %s, skipping validation\n", strerror(errno));
+        return true;
+    }
+
     pid_t pid = fork();
     if (pid == -1) {
         ELOG("fork() failed: %s, skipping validation\n", strerror(errno));
+        close(pipefd[0]);
+        close(pipefd[1]);
         return true;
     }
     if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
         execl("/proc/self/exe", "i3", "-C", "-c", current_configpath, (char *)NULL);
         _exit(127);
     }
+
+    close(pipefd[1]);
+    char buffer[8192];
+    size_t used = 0;
+    for (;;) {
+        const ssize_t n = read(pipefd[0], buffer + used, sizeof(buffer) - 1 - used);
+        if (n <= 0) {
+            break;
+        }
+        used += (size_t)n;
+        if (used >= sizeof(buffer) - 1) {
+            /* Keep draining so that the child never blocks on a full pipe. */
+            char sink[512];
+            while (read(pipefd[0], sink, sizeof(sink)) > 0) {
+            }
+            break;
+        }
+    }
+    close(pipefd[0]);
+    buffer[used] = '\0';
+
     int status;
     waitpid(pid, &status, 0);
-    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    const bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+    if (!ok && detail != NULL) {
+        char *line = strstr(buffer, "i3: 配置错误: ");
+        if (line != NULL) {
+            line += strlen("i3: 配置错误: ");
+            char *newline = strchr(line, '\n');
+            if (newline != NULL) {
+                *newline = '\0';
+            }
+            if (*line != '\0') {
+                *detail = sstrdup(line);
+            }
+        }
+    }
+    return ok;
 }
 
 /*
@@ -175,20 +230,34 @@ static void reload_cb(struct ev_loop *loop, ev_timer *w, int revents) {
     debounce_started = false;
 
     LOG("config file changed on disk, reloading\n");
-    if (!validate_current_config()) {
+    char *detail = NULL;
+    if (!validate_current_config(&detail)) {
         ELOG("configuration validation failed, keeping the previous configuration\n");
         kill_nagbar(error_nagbar_pid, false);
         error_nagbar_pid = -1;
+        char *message = NULL;
+        if (detail != NULL) {
+            sasprintf(&message,
+                      "配置有错误，已保留当前配置: %s — 运行 i3 -C 查看详情", detail);
+        } else {
+            sasprintf(&message,
+                      "配置有错误，已保留当前配置 — 运行 i3 -C 查看详情");
+        }
+        FREE(detail);
         char *argv[] = {
             "i3-nagbar",
+            "-f",
+            "pango:DejaVu Sans Mono 13",
             "-t",
             "error",
             "-m",
-            "i3: configuration file has errors, auto-reload skipped (previous configuration kept)",
+            message,
             NULL};
         start_nagbar(&error_nagbar_pid, argv);
+        free(message);
         return;
     }
+    FREE(detail);
     kill_nagbar(error_nagbar_pid, false);
     error_nagbar_pid = -1;
 

@@ -11,6 +11,7 @@
 #include "all.h"
 
 #include <libgen.h>
+#include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
 
 char *current_configpath = NULL;
@@ -168,6 +169,8 @@ static void free_configuration(void) {
  *
  */
 bool load_configuration(const char *override_configpath, config_load_t load_type) {
+    config_diag_reset();
+
     if (load_type == C_RELOAD) {
         free_configuration();
     }
@@ -372,6 +375,12 @@ bool load_configuration(const char *override_configpath, config_load_t load_type
         /* Redraw the currently visible decorations on reload, so that the
          * possibly new drawing parameters changed. */
         tree_render();
+    }
+
+    /* `i3 -C` doubles as a CLI config checker: print a detailed report with
+     * file:line, source context and fix suggestions. */
+    if (load_type == C_VALIDATE) {
+        config_diag_print(stderr, isatty(STDERR_FILENO) == 1);
     }
 
     return result == 0;

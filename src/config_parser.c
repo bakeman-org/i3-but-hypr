@@ -395,6 +395,19 @@ static void parse_config(struct parser_ctx *ctx, const char *input, struct conte
             }
             ELOG("CONFIG: Line %3d: %s\n", linecnt, error_copy);
             ELOG("CONFIG:           %s\n", position);
+
+            /* Keep the full token list in the log, but give the CLI report a
+             * concise reason: the hint explains what to do. */
+            const char *diag_reason = errormessage;
+            char *short_reason = NULL;
+            if (strncmp(errormessage, "Expected one of these tokens",
+                        strlen("Expected one of these tokens")) == 0) {
+                short_reason = sstrdup("无法识别这一行的开头（不是合法的 i3 指令，或拼写有误）");
+                diag_reason = short_reason;
+            }
+            config_diag_add(context->filename, linecnt, diag_reason,
+                            config_diag_hint_parse(error_copy, errormessage));
+            FREE(short_reason);
             free(error_copy);
             /* Print context lines *after* the error, if any. */
             for (int i = 0; i < 2; i++) {
@@ -508,14 +521,28 @@ void start_config_error_nagbar(const char *configpath, const bool has_errors) {
     char *editaction, *pageraction;
     sasprintf(&editaction, "i3-sensible-editor \"%s\" && i3-msg reload\n", configpath);
     sasprintf(&pageraction, "i3-sensible-pager \"%s\"\n", errorfilename);
+
+    /* Show *where* the first problem is instead of a generic message. The full
+     * report (with source context and hints) is printed by `i3 -C`. */
+    char *summary = config_diag_summary();
+    char *message = NULL;
+    if (has_errors) {
+        sasprintf(&message, "配置有错误（已保留上次可用配置）: %s — 运行 i3 -C 查看详情",
+                  summary != NULL ? summary : "unknown error");
+    } else {
+        sasprintf(&message, "配置有警告（已保留上次可用配置）: %s — 运行 i3 -C 查看详情",
+                  summary != NULL ? summary : "unknown warning");
+    }
+    FREE(summary);
+
     char *argv[] = {
         NULL, /* will be replaced by the executable path */
         "-f",
-        (config.font.pattern ? config.font.pattern : "fixed"),
+        "pango:DejaVu Sans Mono 13",
         "-t",
         (has_errors ? "error" : "warning"),
         "-m",
-        (has_errors ? "You have an error in your i3 config file!" : "Your config is outdated. Please fix the warnings to make sure everything works."),
+        message,
         "-b",
         "edit config",
         editaction,
@@ -527,6 +554,7 @@ void start_config_error_nagbar(const char *configpath, const bool has_errors) {
     start_nagbar(&config_error_nagbar_pid, argv);
     free(editaction);
     free(pageraction);
+    free(message);
 }
 
 /*
