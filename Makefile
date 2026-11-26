@@ -1,8 +1,8 @@
 __sample_config_push:
-	cp ./etc/config ~/.config/i3/config
+	cp -iv ./etc/config ~/.config/i3/config
 
 __sync_local_config:
-	cp ~/.config/i3/config ./etc/config
+	cp -iv ~/.config/i3/config ./etc/config
 
 __test:
 	meson setup build
